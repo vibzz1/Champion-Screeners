@@ -483,7 +483,25 @@ def parse_formula(formula: str) -> Dict:
     result: Dict = {}
     unrecognized: list = []
     text = formula.lower().strip()
-    parts = _re.split(r'\s+and\s+', text)
+
+    # Paren-aware split on ' and ' — don't break inside !(... and ...)
+    def _split_and(s: str):
+        clauses, depth, buf = [], 0, []
+        i = 0
+        while i < len(s):
+            if s[i] == '(':
+                depth += 1; buf.append(s[i])
+            elif s[i] == ')':
+                depth -= 1; buf.append(s[i])
+            elif depth == 0 and s[i:i+5] == ' and ':
+                clauses.append(''.join(buf).strip()); buf = []; i += 5; continue
+            else:
+                buf.append(s[i])
+            i += 1
+        if buf: clauses.append(''.join(buf).strip())
+        return clauses
+
+    parts = _split_and(text)
 
     # Clauses that reference MIO-specific functions we intentionally skip
     # (exchange selector handles exch(); lookback @{} notation not supported)
@@ -657,6 +675,15 @@ def parse_formula(formula: str) -> Dict:
                 result.setdefault('sma_conditions', [])
                 if cond not in result['sma_conditions']:
                     result['sma_conditions'].append(cond)
+                matched = True
+
+            # !(price < sma(N) and sma(N) trend_dn M) — MIO combined NOT
+            # De Morgan: NOT(A AND B) = NOT A OR NOT B
+            # = price >= sma(N) OR sma(N) not falling → reject only if BOTH true
+            elif (m := _re.match(
+                r'!\s*\(?\s*price\s*<\s*sma\s*\(?\s*(\d+)\s*\)?\s*and\s*sma\s*\(?\s*\1\s*\)?\s*trend_dn\s+(\d+)\s*\)?', p)):
+                n_s, bars_s = m.group(1), m.group(2)
+                result[f'not_price_below_sma{n_s}_and_trend_dn_{bars_s}'] = True
                 matched = True
 
             # !(sma(N) OP sma(M)) — negation: flip the operator
@@ -1367,9 +1394,24 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
         dv50 = ind.get("dollar_vol_50")
         if dv50 is None or dv50 < f["dollar_vol_50_min"]: return False
 
+    # !(price < sma(N) and sma(N) trend_dn M) — reject only when BOTH conditions true
+    # i.e. keep the stock unless price is below a falling sma(N)
+    import re as _filter_re
+    for fkey, fval in f.items():
+        if fval is True and fkey.startswith('not_price_below_sma'):
+            m = _filter_re.match(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)', fkey)
+            if m:
+                n_s, bars_s = int(m.group(1)), int(m.group(2))
+                sma_val = ind.get(f"sma{n_s}")
+                trend_key = f"sma{n_s}_trend_dn_{bars_s}"
+                trend_dn = ind.get(trend_key, False)
+                price_below = (sma_val is not None and ind["price"] < sma_val)
+                if price_below and trend_dn:
+                    return False
+
     # SMA trend direction — any sma{N}_trend_dn_{M} or sma{N}_trend_up_{M} key
     for fkey, fval in f.items():
-        if fval is True and ('_trend_dn_' in fkey or '_trend_up_' in fkey):
+        if fval is True and ('_trend_dn_' in fkey or '_trend_up_' in fkey) and not fkey.startswith('not_price_below_sma'):
             if not ind.get(fkey): return False
 
     # Relative volume
