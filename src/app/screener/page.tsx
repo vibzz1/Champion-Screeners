@@ -425,34 +425,25 @@ export default function ScreenerPage() {
   const [isLive, setIsLive]          = useState(false);
 
   // ── Persistence ──────────────────────────────────────────────────────────
+  // Built-ins (d1–d6) always come from DEFAULTS in code — never from localStorage.
+  // localStorage only stores user-created custom screeners (non-"d" prefix IDs).
+  const DEFAULT_IDS = new Set(DEFAULTS.map(d => d.id));
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
-      if (!raw) { setScreeners(DEFAULTS); return; }
-      const saved: SavedScreener[] = JSON.parse(raw);
-      if (!saved.length) { setScreeners(DEFAULTS); return; }
-      // Migrate: for built-in screeners (d1–d6), always sync name, formula,
-      // and interval from DEFAULTS so any code-level update propagates.
-      const defaultById = Object.fromEntries(DEFAULTS.map(d => [d.id, d]));
-      let changed = false;
-      const patched = saved.map(s => {
-        const def = defaultById[s.id];
-        if (!def) return s;
-        const updates: Partial<SavedScreener> = {};
-        if (s.formula !== def.formula) updates.formula = def.formula;
-        if (s.name !== def.name) updates.name = def.name;
-        if ((s.interval ?? "1d") !== (def.interval ?? "1d")) updates.interval = def.interval;
-        if (Object.keys(updates).length > 0) { changed = true; return { ...s, ...updates }; }
-        return s;
-      });
-      if (changed) localStorage.setItem(LS_KEY, JSON.stringify(patched));
-      setScreeners(patched);
+      const saved: SavedScreener[] = raw ? JSON.parse(raw) : [];
+      // Keep only user-created screeners (not built-ins)
+      const custom = saved.filter(s => !DEFAULT_IDS.has(s.id));
+      setScreeners([...DEFAULTS, ...custom]);
     } catch { setScreeners(DEFAULTS); }
   }, []);
 
   function persist(list: SavedScreener[]) {
     setScreeners(list);
-    localStorage.setItem(LS_KEY, JSON.stringify(list));
+    // Only persist custom screeners; built-ins always loaded fresh from code
+    const custom = list.filter(s => !DEFAULT_IDS.has(s.id));
+    localStorage.setItem(LS_KEY, JSON.stringify(custom));
   }
 
   function saveScreener(s: SavedScreener) {
