@@ -18,12 +18,17 @@ import pickle
 import datetime
 import os
 import json
+import re as _re_module
+import concurrent.futures
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import pytz
+
+# Pre-compiled regex used in the hot apply_filters loop
+_NOT_BELOW_RE = _re_module.compile(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)')
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
@@ -848,8 +853,9 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
         return None
 
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
-DOWNLOAD_BATCH          = 200   # tickers per yf.download() call (daily)
-DOWNLOAD_BATCH_INTRADAY = 80    # smaller batch for 15min data
+DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
+DOWNLOAD_BATCH_INTRADAY = 100   # tickers per yf.download() call (15min)
+DOWNLOAD_WORKERS        = 3     # concurrent batch downloads
 
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
@@ -985,40 +991,42 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
         return cached
 
-    n_batches = (len(tickers) + DOWNLOAD_BATCH - 1) // DOWNLOAD_BATCH
-    print(f"[screener] {exchange}: downloading {len(tickers)} tickers in {n_batches} batches…")
+    batches = [tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(tickers), DOWNLOAD_BATCH)]
+    n_batches = len(batches)
+    print(f"[screener] {exchange}: downloading {len(tickers)} tickers in "
+          f"{n_batches} batches × {DOWNLOAD_WORKERS} parallel workers…")
     data: Dict[str, pd.DataFrame] = {}
 
-    for i in range(0, len(tickers), DOWNLOAD_BATCH):
-        batch   = tickers[i : i + DOWNLOAD_BATCH]
-        b_num   = i // DOWNLOAD_BATCH + 1
+    def _fetch_batch(args):
+        b_num, batch = args
         try:
             raw = yf.download(
                 batch, period="1y", auto_adjust=True,
                 progress=False, group_by="ticker", threads=True,
             )
             if raw is None or raw.empty:
-                print(f"[screener] batch {b_num}/{n_batches}: empty response")
-                continue
-
-            ok = 0
+                print(f"[screener] batch {b_num}/{n_batches}: empty")
+                return {}
+            result = {}
             for ticker in batch:
                 df = _normalize_df(raw, ticker)
                 if df is not None:
-                    data[ticker] = df
-                    ok += 1
-            print(f"[screener] batch {b_num}/{n_batches}: {ok}/{len(batch)} tickers OK")
-
+                    result[ticker] = df
+            print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
+            return result
         except Exception as e:
             print(f"[screener] batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
+            return {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        for batch_data in pool.map(_fetch_batch, enumerate(batches, 1)):
+            data.update(batch_data)
 
     print(f"[screener] {exchange}: {len(data)} tickers downloaded — saving cache…")
-    # Only persist if we downloaded a meaningful fraction of the requested universe.
-    # This prevents a small debug run (e.g. tickers[:10]) from overwriting a full cache.
     if len(data) >= max(50, len(tickers) * 0.5):
         _save_ohlcv_cache(exchange, data)
     else:
-        print(f"[screener] {exchange}: skipping cache save — too few tickers ({len(data)}/{len(tickers)})")
+        print(f"[screener] {exchange}: skipping cache save ({len(data)}/{len(tickers)})")
     return data
 
 # ── Indicator Computation ──────────────────────────────────────────────────
@@ -1396,17 +1404,14 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
 
     # !(price < sma(N) and sma(N) trend_dn M) — reject only when BOTH conditions true
     # i.e. keep the stock unless price is below a falling sma(N)
-    import re as _filter_re
     for fkey, fval in f.items():
         if fval is True and fkey.startswith('not_price_below_sma'):
-            m = _filter_re.match(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)', fkey)
+            m = _NOT_BELOW_RE.match(fkey)
             if m:
                 n_s, bars_s = int(m.group(1)), int(m.group(2))
                 sma_val = ind.get(f"sma{n_s}")
-                trend_key = f"sma{n_s}_trend_dn_{bars_s}"
-                trend_dn = ind.get(trend_key, False)
-                price_below = (sma_val is not None and ind["price"] < sma_val)
-                if price_below and trend_dn:
+                trend_dn = ind.get(f"sma{n_s}_trend_dn_{bars_s}", False)
+                if sma_val is not None and ind["price"] < sma_val and trend_dn:
                     return False
 
     # SMA trend direction — any sma{N}_trend_dn_{M} or sma{N}_trend_up_{M} key
