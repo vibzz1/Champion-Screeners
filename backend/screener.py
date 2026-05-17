@@ -1619,17 +1619,24 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
         else:
             live_bars = _fetch_live_us_bars(tickers)
 
-    # Stage 3: Compute indicators + filter
-    matched = []
-    for ticker in tickers:
+    # Stage 3: Compute indicators + filter — parallel across all tickers
+    def _process(ticker: str):
         df = ohlcv_data.get(ticker)
         if df is None:
-            continue
+            return None
         if live_bars.get(ticker):
             df = _patch_live_bar(df, live_bars[ticker])
         ind = compute_indicators(ticker, df, as_of_date=as_of_date)
         if ind and apply_filters(ind, filters):
-            matched.append(ind)
+            return ind
+        return None
+
+    matched = []
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(max_workers=12) as pool:
+        for ind in pool.map(_process, tickers):
+            if ind is not None:
+                matched.append(ind)
 
     # Stage 4: Enrich matched stocks with name/sector/cap
     matched = [_enrich(r) for r in matched]
