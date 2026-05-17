@@ -827,11 +827,18 @@ DOWNLOAD_BATCH_INTRADAY = 80    # smaller batch for 15min data
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
 
-def _ohlcv_75min_cache_path(exchange: str) -> Path:
-    return OHLCV_CACHE_DIR / f"{exchange}_75min_{datetime.date.today().isoformat()}.pkl"
+def _intraday_bar_minutes(exchange: str) -> int:
+    """Return the canonical intraday bar size (minutes) for an exchange.
+    NSE/BSE: 9:15–15:30 = 375 min → 5 bars × 75 min
+    US (NYSE/NASDAQ/SP500…): 9:30–16:00 = 390 min → 5 bars × 78 min
+    """
+    return 75 if exchange in ("NSE", "BSE") else 78
 
-def _load_75min_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
-    p = _ohlcv_75min_cache_path(exchange)
+def _ohlcv_intraday_cache_path(exchange: str, bar_min: int) -> Path:
+    return OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{datetime.date.today().isoformat()}.pkl"
+
+def _load_intraday_cache(exchange: str, bar_min: int) -> Optional[Dict[str, pd.DataFrame]]:
+    p = _ohlcv_intraday_cache_path(exchange, bar_min)
     if p.exists():
         try:
             with open(p, "rb") as f:
@@ -840,15 +847,18 @@ def _load_75min_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
             pass
     return None
 
-def _save_75min_cache(exchange: str, data: Dict[str, pd.DataFrame]):
-    for old in OHLCV_CACHE_DIR.glob(f"{exchange}_75min_*.pkl"):
+def _save_intraday_cache(exchange: str, bar_min: int, data: Dict[str, pd.DataFrame]):
+    for old in OHLCV_CACHE_DIR.glob(f"{exchange}_{bar_min}min_*.pkl"):
         try: old.unlink()
         except: pass
-    with open(_ohlcv_75min_cache_path(exchange), "wb") as f:
+    with open(_ohlcv_intraday_cache_path(exchange, bar_min), "wb") as f:
         pickle.dump(data, f, protocol=4)
 
-def _resample_to_75min(df_15: pd.DataFrame, exchange: str) -> Optional[pd.DataFrame]:
-    """Resample 15-min OHLCV to 75-min bars aligned to market open."""
+def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Optional[pd.DataFrame]:
+    """Resample 15-min OHLCV to bar_min-min bars aligned to exchange market open.
+    NSE/BSE offset: 9h15m (market opens 09:15 IST)
+    US offset: 9h30m (market opens 09:30 ET)
+    """
     if df_15 is None or df_15.empty:
         return None
     try:
@@ -864,30 +874,30 @@ def _resample_to_75min(df_15: pd.DataFrame, exchange: str) -> Optional[pd.DataFr
             df_15 = df_15.copy()
             df_15.index = df_15.index.tz_convert(tz_name)
 
-        df_75 = df_15.resample("75min", offset=offset).agg(
+        df_out = df_15.resample(f"{bar_min}min", offset=offset).agg(
             Open=("Open", "first"), High=("High", "max"),
             Low=("Low", "min"),  Close=("Close", "last"),
             Volume=("Volume", "sum"),
         )
-        df_75 = df_75.dropna(subset=["Open", "Close"])
-        df_75 = df_75[df_75["Volume"] > 0]
+        df_out = df_out.dropna(subset=["Open", "Close"])
+        df_out = df_out[df_out["Volume"] > 0]
         # Strip timezone for consistency with daily data
-        df_75.index = df_75.index.tz_localize(None)
-        return df_75 if len(df_75) >= 20 else None
+        df_out.index = df_out.index.tz_localize(None)
+        return df_out if len(df_out) >= 20 else None
     except Exception as e:
-        print(f"[screener] _resample_to_75min error: {type(e).__name__}: {e}")
+        print(f"[screener] _resample_intraday({bar_min}min) error: {type(e).__name__}: {e}")
         return None
 
-def _download_75min_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame]:
-    """Download 15-min OHLCV (60 days) and resample to 75-min; cache to disk."""
-    cached = _load_75min_cache(exchange)
+def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) -> Dict[str, pd.DataFrame]:
+    """Download 15-min OHLCV (60 days) and resample to bar_min-min bars; cache to disk."""
+    cached = _load_intraday_cache(exchange, bar_min)
     if cached is not None:
-        print(f"[screener] {exchange} 75min: {len(cached)} tickers from cache")
+        print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache")
         return cached
 
     n_batches = (len(tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
-    print(f"[screener] {exchange} 75min: downloading {len(tickers)} tickers "
-          f"in {n_batches} batches (15m→75m)…")
+    print(f"[screener] {exchange} {bar_min}min: downloading {len(tickers)} tickers "
+          f"in {n_batches} batches (15m→{bar_min}m)…")
     data: Dict[str, pd.DataFrame] = {}
 
     for i in range(0, len(tickers), DOWNLOAD_BATCH_INTRADAY):
@@ -899,24 +909,24 @@ def _download_75min_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.Dat
                 progress=False, group_by="ticker", threads=True,
             )
             if raw is None or raw.empty:
-                print(f"[screener] 75min batch {b_num}/{n_batches}: empty")
+                print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: empty")
                 continue
             ok = 0
             for ticker in batch:
                 df_15 = _normalize_df(raw, ticker)
                 if df_15 is None:
                     continue
-                df_75 = _resample_to_75min(df_15, exchange)
-                if df_75 is not None:
-                    data[ticker] = df_75
+                df_bar = _resample_intraday(df_15, exchange, bar_min)
+                if df_bar is not None:
+                    data[ticker] = df_bar
                     ok += 1
-            print(f"[screener] 75min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
+            print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
         except Exception as e:
-            print(f"[screener] 75min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
+            print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
 
-    print(f"[screener] {exchange} 75min: {len(data)} tickers — saving cache…")
+    print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
     if len(data) >= max(20, len(tickers) * 0.3):
-        _save_75min_cache(exchange, data)
+        _save_intraday_cache(exchange, bar_min, data)
     return data
 
 def _load_ohlcv_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
@@ -1522,9 +1532,16 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     if not tickers:
         return [], False
 
-    # ── 75-min intraday path ──────────────────────────────────────────────
-    if interval == "75min":
-        ohlcv_data = _download_75min_ohlcv(exchange, tickers)
+    # ── Intraday path (75min for NSE/BSE, 78min for US) ──────────────────
+    if interval in ("75min", "78min", "intraday"):
+        # Derive bar size: respect explicit interval, fall back to exchange default
+        if interval == "75min":
+            bar_min = 75
+        elif interval == "78min":
+            bar_min = 78
+        else:
+            bar_min = _intraday_bar_minutes(exchange)
+        ohlcv_data = _download_intraday_ohlcv(exchange, tickers, bar_min)
         matched: List[Dict] = []
         for ticker in tickers:
             df = ohlcv_data.get(ticker)

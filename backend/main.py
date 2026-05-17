@@ -190,7 +190,7 @@ def delete_position(pos_id: int, db: Session = Depends(get_db)):
 
 class ScreenerFilters(BaseModel):
     exchange: str = "NSE"
-    interval: str = "1d"                   # "1d" (daily) or "75min"
+    interval: str = "1d"                   # "1d" (daily) | "75min" (NSE/BSE) | "78min" (US)
     formula: Optional[str] = None          # plain-text formula (parsed server-side)
     price_min: Optional[float] = None
     price_max: Optional[float] = None
