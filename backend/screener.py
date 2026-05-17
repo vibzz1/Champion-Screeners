@@ -797,10 +797,103 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
         return None
 
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
-DOWNLOAD_BATCH = 200   # tickers per yf.download() call
+DOWNLOAD_BATCH          = 200   # tickers per yf.download() call (daily)
+DOWNLOAD_BATCH_INTRADAY = 80    # smaller batch for 15min data
 
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
+
+def _ohlcv_75min_cache_path(exchange: str) -> Path:
+    return OHLCV_CACHE_DIR / f"{exchange}_75min_{datetime.date.today().isoformat()}.pkl"
+
+def _load_75min_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
+    p = _ohlcv_75min_cache_path(exchange)
+    if p.exists():
+        try:
+            with open(p, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    return None
+
+def _save_75min_cache(exchange: str, data: Dict[str, pd.DataFrame]):
+    for old in OHLCV_CACHE_DIR.glob(f"{exchange}_75min_*.pkl"):
+        try: old.unlink()
+        except: pass
+    with open(_ohlcv_75min_cache_path(exchange), "wb") as f:
+        pickle.dump(data, f, protocol=4)
+
+def _resample_to_75min(df_15: pd.DataFrame, exchange: str) -> Optional[pd.DataFrame]:
+    """Resample 15-min OHLCV to 75-min bars aligned to market open."""
+    if df_15 is None or df_15.empty:
+        return None
+    try:
+        idx = df_15.index
+        tz_name = "Asia/Kolkata" if exchange in ("NSE", "BSE") else "America/New_York"
+        offset  = pd.Timedelta("9h15min") if exchange in ("NSE", "BSE") else pd.Timedelta("9h30min")
+
+        # Ensure tz-aware
+        if idx.tz is None:
+            df_15 = df_15.copy()
+            df_15.index = idx.tz_localize(tz_name, ambiguous="infer", nonexistent="shift_forward")
+        else:
+            df_15 = df_15.copy()
+            df_15.index = df_15.index.tz_convert(tz_name)
+
+        df_75 = df_15.resample("75min", offset=offset).agg(
+            Open=("Open", "first"), High=("High", "max"),
+            Low=("Low", "min"),  Close=("Close", "last"),
+            Volume=("Volume", "sum"),
+        )
+        df_75 = df_75.dropna(subset=["Open", "Close"])
+        df_75 = df_75[df_75["Volume"] > 0]
+        # Strip timezone for consistency with daily data
+        df_75.index = df_75.index.tz_localize(None)
+        return df_75 if len(df_75) >= 20 else None
+    except Exception as e:
+        print(f"[screener] _resample_to_75min error: {type(e).__name__}: {e}")
+        return None
+
+def _download_75min_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame]:
+    """Download 15-min OHLCV (60 days) and resample to 75-min; cache to disk."""
+    cached = _load_75min_cache(exchange)
+    if cached is not None:
+        print(f"[screener] {exchange} 75min: {len(cached)} tickers from cache")
+        return cached
+
+    n_batches = (len(tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
+    print(f"[screener] {exchange} 75min: downloading {len(tickers)} tickers "
+          f"in {n_batches} batches (15m→75m)…")
+    data: Dict[str, pd.DataFrame] = {}
+
+    for i in range(0, len(tickers), DOWNLOAD_BATCH_INTRADAY):
+        batch = tickers[i : i + DOWNLOAD_BATCH_INTRADAY]
+        b_num = i // DOWNLOAD_BATCH_INTRADAY + 1
+        try:
+            raw = yf.download(
+                batch, period="60d", interval="15m", auto_adjust=True,
+                progress=False, group_by="ticker", threads=True,
+            )
+            if raw is None or raw.empty:
+                print(f"[screener] 75min batch {b_num}/{n_batches}: empty")
+                continue
+            ok = 0
+            for ticker in batch:
+                df_15 = _normalize_df(raw, ticker)
+                if df_15 is None:
+                    continue
+                df_75 = _resample_to_75min(df_15, exchange)
+                if df_75 is not None:
+                    data[ticker] = df_75
+                    ok += 1
+            print(f"[screener] 75min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
+        except Exception as e:
+            print(f"[screener] 75min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
+
+    print(f"[screener] {exchange} 75min: {len(data)} tickers — saving cache…")
+    if len(data) >= max(20, len(tickers) * 0.3):
+        _save_75min_cache(exchange, data)
+    return data
 
 def _load_ohlcv_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
     p = _ohlcv_cache_path(exchange)
@@ -868,15 +961,16 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     return data
 
 # ── Indicator Computation ──────────────────────────────────────────────────
-def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None) -> Optional[Dict[str, Any]]:
+def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, intraday: bool = False) -> Optional[Dict[str, Any]]:
     """Returns OHLCV-based indicators. Info (name/sector/cap) added later.
 
     Expects a clean DataFrame from _normalize_df (flat columns, NaN rows
     already dropped). Applies an additional safety normalisation just in case
     the caller passes a raw/un-normalised frame.
     """
+    min_bars = 20 if intraday else 30
     try:
-        if df is None or df.empty or len(df) < 30:
+        if df is None or df.empty or len(df) < min_bars:
             return None
 
         # ── Safety normalisation (no-op when df is already clean) ──────────
@@ -889,7 +983,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None) ->
             return None
 
         df = df.dropna(subset=['Open', 'High', 'Low', 'Close'])
-        if len(df) < 30:
+        if len(df) < min_bars:
             return None
 
         # Historical scan: slice to as_of_date so iloc[-1] = that day
@@ -997,10 +1091,12 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None) ->
         pct_l52      = _sf((price - l52) / l52 * 100) if l52 else None
         new_52w_high = bool(pct_h52 is not None and pct_h52 >= -0.5)
 
-        # ── OHLCV — last 252 bars with per-bar SMA20 for interactive chart ──
+        # ── OHLCV — last N bars with per-bar SMA20/50 for interactive chart ──
+        chart_bars = 300 if intraday else 252  # 60d×5bars for 75min, 1y for daily
+        date_fmt   = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
         sma20_rolling = close.rolling(20).mean()
         sma50_rolling = close.rolling(50).mean()
-        df_tail = df.tail(252)
+        df_tail = df.tail(chart_bars)
         ohlcv: list = []
         for ts, row in df_tail.iterrows():
             try:
@@ -1015,7 +1111,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None) ->
                 s20_raw = sma20_rolling.get(ts)
                 s50_raw = sma50_rolling.get(ts)
                 ohlcv.append({
-                    "date":   ts.strftime("%Y-%m-%d"),
+                    "date":   ts.strftime(date_fmt),
                     "open":   round(o,  2),
                     "high":   round(h,  2),
                     "low":    round(lo, 2),
@@ -1375,12 +1471,28 @@ def _patch_live_bar(df: pd.DataFrame, bar: Dict) -> pd.DataFrame:
 
 
 # ── Run Screen ─────────────────────────────────────────────────────────────
-def run_screen(exchange: str, filters: Dict, as_of_date: str = None) -> tuple:
+def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: str = "1d") -> tuple:
     """Returns (results: List[Dict], is_live: bool)."""
     tickers = UNIVERSES.get(exchange, [])
     if not tickers:
         return [], False
 
+    # ── 75-min intraday path ──────────────────────────────────────────────
+    if interval == "75min":
+        ohlcv_data = _download_75min_ohlcv(exchange, tickers)
+        matched: List[Dict] = []
+        for ticker in tickers:
+            df = ohlcv_data.get(ticker)
+            if df is None:
+                continue
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True)
+            if ind and apply_filters(ind, filters):
+                matched.append(ind)
+        matched = [_enrich(r) for r in matched]
+        matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
+        return matched, False
+
+    # ── Daily path (default) ──────────────────────────────────────────────
     # Stage 1: Historical OHLCV (cache or download)
     ohlcv_data = _download_ohlcv(exchange, tickers)
 
@@ -1394,7 +1506,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None) -> tuple:
             live_bars = _fetch_live_us_bars(tickers)
 
     # Stage 3: Compute indicators + filter
-    matched: List[Dict] = []
+    matched = []
     for ticker in tickers:
         df = ohlcv_data.get(ticker)
         if df is None:
