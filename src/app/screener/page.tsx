@@ -431,15 +431,15 @@ export default function ScreenerPage() {
       if (!raw) { setScreeners(DEFAULTS); return; }
       const saved: SavedScreener[] = JSON.parse(raw);
       if (!saved.length) { setScreeners(DEFAULTS); return; }
-      // Migrate: for built-in screeners (d1–d6), always sync name, interval,
-      // and formula (if empty) from DEFAULTS so code changes propagate.
+      // Migrate: for built-in screeners (d1–d6), always sync name, formula,
+      // and interval from DEFAULTS so any code-level update propagates.
       const defaultById = Object.fromEntries(DEFAULTS.map(d => [d.id, d]));
       let changed = false;
       const patched = saved.map(s => {
         const def = defaultById[s.id];
         if (!def) return s;
         const updates: Partial<SavedScreener> = {};
-        if (!s.formula.trim() && def.formula.trim()) updates.formula = def.formula;
+        if (s.formula !== def.formula) updates.formula = def.formula;
         if (s.name !== def.name) updates.name = def.name;
         if ((s.interval ?? "1d") !== (def.interval ?? "1d")) updates.interval = def.interval;
         if (Object.keys(updates).length > 0) { changed = true; return { ...s, ...updates }; }
