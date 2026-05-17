@@ -14,15 +14,10 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# CORS_ORIGIN: space or comma-separated list of allowed origins.
-# Set CORS_ORIGIN="https://your-app.vercel.app" in Railway env vars.
-_raw = os.getenv("CORS_ORIGIN", "http://localhost:3000")
-_origins = [o.strip() for o in _raw.replace(",", " ").split() if o.strip()]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
