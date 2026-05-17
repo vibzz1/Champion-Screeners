@@ -1024,10 +1024,15 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         if as_of_date:
             try:
                 cutoff = pd.Timestamp(as_of_date)
-                df = df[df.index <= cutoff]
-            except Exception:
-                pass
-            if df is None or len(df) < 30:
+                idx = df.index
+                # yfinance can return tz-aware DatetimeIndex; normalize both sides
+                if hasattr(idx, "tz") and idx.tz is not None:
+                    cutoff = cutoff.tz_localize(idx.tz)
+                df = df[idx <= cutoff]
+            except Exception as e:
+                print(f"[screener] as_of_date slice error for {ticker}: {e}")
+                return None          # fail loudly instead of silently using full data
+            if df is None or len(df) < min_bars:
                 return None
 
         # ── Core series ────────────────────────────────────────────────────
