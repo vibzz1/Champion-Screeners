@@ -1621,19 +1621,22 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
 
     # Stage 3: Compute indicators + filter — parallel across all tickers
     def _process(ticker: str):
-        df = ohlcv_data.get(ticker)
-        if df is None:
+        try:
+            df = ohlcv_data.get(ticker)
+            if df is None:
+                return None
+            if live_bars.get(ticker):
+                df = _patch_live_bar(df, live_bars[ticker])
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date)
+            if ind and apply_filters(ind, filters):
+                return ind
             return None
-        if live_bars.get(ticker):
-            df = _patch_live_bar(df, live_bars[ticker])
-        ind = compute_indicators(ticker, df, as_of_date=as_of_date)
-        if ind and apply_filters(ind, filters):
-            return ind
-        return None
+        except Exception as e:
+            print(f"[screener] _process({ticker}): {type(e).__name__}: {e}")
+            return None
 
     matched = []
-    import concurrent.futures as _cf
-    with _cf.ThreadPoolExecutor(max_workers=12) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
         for ind in pool.map(_process, tickers):
             if ind is not None:
                 matched.append(ind)
