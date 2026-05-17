@@ -486,10 +486,9 @@ def parse_formula(formula: str) -> Dict:
     parts = _re.split(r'\s+and\s+', text)
 
     # Clauses that reference MIO-specific functions we intentionally skip
-    # (exchange selector handles exch(); negation and lookback are skipped for now)
+    # (exchange selector handles exch(); lookback @{} notation not supported)
     _SKIP = _re.compile(
         r'^exch\s*\(|'            # exch(nse) — handled by exchange selector
-        r'^!|'                     # negation — skip (complex logic not supported)
         r'@\{'                     # lookback periods @{0..20}
     )
 
@@ -562,10 +561,12 @@ def parse_formula(formula: str) -> Dict:
                 result['macd_signal'] = 'bearish'; matched = True
 
             # advol(n) > X  — average DOLLAR volume in millions (MIO: price × volume ÷ 1M)
-            elif (m := _re.match(r'advol\s*\(\s*\d+\s*\)\s*([><=]+)\s*([\d.]+)', p)):
-                op, val = m.group(1), float(m.group(2))   # val already in millions
+            # advol(20) → dollar_vol_min  |  advol(50) → dollar_vol_50_min
+            elif (m := _re.match(r'advol\s*\(\s*(\d+)\s*\)\s*([><=]+)\s*([\d.]+)', p)):
+                n_adv, op, val = int(m.group(1)), m.group(2), float(m.group(3))
                 if '>' in op:
-                    result['dollar_vol_min'] = max(result.get('dollar_vol_min') or 0, val)
+                    key = 'dollar_vol_50_min' if n_adv == 50 else 'dollar_vol_min'
+                    result[key] = max(result.get(key) or 0, val)
                 matched = True
 
             # avol(n) > X  — average SHARE volume in millions
@@ -656,6 +657,29 @@ def parse_formula(formula: str) -> Dict:
                 result.setdefault('sma_conditions', [])
                 if cond not in result['sma_conditions']:
                     result['sma_conditions'].append(cond)
+                matched = True
+
+            # !(sma(N) OP sma(M)) — negation: flip the operator
+            # e.g. !(sma(20) < sma(50))  →  sma20 >= sma50  →  sma20_above_sma50
+            elif (m := _re.match(r'!\s*\(?\s*sma\s*\(?\s*(\d+)\s*\)?\s*([<>]=?)\s*sma\s*\(?\s*(\d+)\s*\)?\s*\)?', p)):
+                n1, op, n2 = m.group(1), m.group(2), m.group(3)
+                # Flip: !(N < M) = N >= M = above; !(N > M) = N <= M = below
+                cond = f"sma{n1}_{'above' if '<' in op else 'below'}_sma{n2}"
+                result.setdefault('sma_conditions', [])
+                if cond not in result['sma_conditions']:
+                    result['sma_conditions'].append(cond)
+                matched = True
+
+            # sma(N) trend_dn M — sma(N) now < sma(N) M bars ago (MIO trend direction)
+            elif (m := _re.match(r'sma\s*\(?\s*(\d+)\s*\)?\s*trend_dn\s+(\d+)', p)):
+                n_s, bars_s = m.group(1), m.group(2)
+                result[f'sma{n_s}_trend_dn_{bars_s}'] = True
+                matched = True
+
+            # sma(N) trend_up M — sma(N) now > sma(N) M bars ago
+            elif (m := _re.match(r'sma\s*\(?\s*(\d+)\s*\)?\s*trend_up\s+(\d+)', p)):
+                n_s, bars_s = m.group(1), m.group(2)
+                result[f'sma{n_s}_trend_up_{bars_s}'] = True
                 matched = True
 
             # SMA vs SMA  — APPEND to sma_conditions list
@@ -1039,8 +1063,17 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         day_range = hi_last - lo_last
         candle_pos = _sf((price - lo_last) / day_range, 4) if day_range > 0 else None
 
-        # Dollar volume (advol): avg(price × volume) over 20 bars, in millions — MIO standard
-        dollar_vol_20 = _sf(float((close * vol).tail(20).mean()) / 1_000_000, 3)
+        # Dollar volume (advol): avg(price × volume) over N bars, in millions — MIO standard
+        dv_series     = close * vol
+        dollar_vol_20 = _sf(float(dv_series.tail(20).mean()) / 1_000_000, 3)
+        dollar_vol_50 = _sf(float(dv_series.tail(50).mean()) / 1_000_000, 3) if len(dv_series) >= 50 else None
+
+        # SMA trend: is sma(N) currently trending up or down vs M bars ago?
+        # sma(50) trend_dn 20  →  sma50_now < sma50_20_bars_ago  (MIO semantics)
+        sma50_series     = close.rolling(50).mean()
+        sma50_20bars_ago = float(sma50_series.iloc[-21]) if len(sma50_series) >= 51 else None
+        sma50_trend_dn_20 = bool(sma50 is not None and sma50_20bars_ago is not None
+                                  and sma50 < sma50_20bars_ago)
 
         # Relative volume: today's volume vs 20-day average
         rvol = _sf(float(vol.iloc[-1]) / avg_vol_20, 2) if avg_vol_20 > 0 else None
@@ -1140,6 +1173,8 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             "atr_ratio":         atr_ratio,
             "candle_pos":        candle_pos,
             "dollar_vol_20":     dollar_vol_20,
+            "dollar_vol_50":     dollar_vol_50,
+            "sma50_trend_dn_20": sma50_trend_dn_20,
             "rvol":              rvol,
             "gap_pct":           gap_pct,
             "offh_21":           offh_21,
@@ -1311,6 +1346,16 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
     if f.get("dollar_vol_min") is not None:
         dv = ind.get("dollar_vol_20")
         if dv is None or dv < f["dollar_vol_min"]: return False
+
+    # Dollar volume over 50 bars (advol(50))
+    if f.get("dollar_vol_50_min") is not None:
+        dv50 = ind.get("dollar_vol_50")
+        if dv50 is None or dv50 < f["dollar_vol_50_min"]: return False
+
+    # SMA trend direction — any sma{N}_trend_dn_{M} or sma{N}_trend_up_{M} key
+    for fkey, fval in f.items():
+        if fval is True and ('_trend_dn_' in fkey or '_trend_up_' in fkey):
+            if not ind.get(fkey): return False
 
     # Relative volume
     if f.get("rvol_min") is not None:
