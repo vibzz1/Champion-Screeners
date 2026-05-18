@@ -999,24 +999,25 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
 
     def _fetch_batch(args):
         b_num, batch = args
-        try:
-            raw = yf.download(
-                batch, period="1y", auto_adjust=True,
-                progress=False, group_by="ticker", threads=True,
-            )
-            if raw is None or raw.empty:
-                print(f"[screener] batch {b_num}/{n_batches}: empty")
-                return {}
-            result = {}
-            for ticker in batch:
-                df = _normalize_df(raw, ticker)
-                if df is not None:
-                    result[ticker] = df
-            print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
-            return result
-        except Exception as e:
-            print(f"[screener] batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
-            return {}
+        for attempt in range(1, 3):          # up to 2 attempts per batch
+            try:
+                raw = yf.download(
+                    batch, period="1y", auto_adjust=True,
+                    progress=False, group_by="ticker", threads=True,
+                )
+                if raw is None or raw.empty:
+                    print(f"[screener] batch {b_num}/{n_batches} attempt {attempt}: empty")
+                    continue
+                result = {}
+                for ticker in batch:
+                    df = _normalize_df(raw, ticker)
+                    if df is not None:
+                        result[ticker] = df
+                print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
+                return result
+            except Exception as e:
+                print(f"[screener] batch {b_num}/{n_batches} attempt {attempt} failed: {type(e).__name__}: {e}")
+        return {}  # both attempts failed
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
         for batch_data in pool.map(_fetch_batch, enumerate(batches, 1)):

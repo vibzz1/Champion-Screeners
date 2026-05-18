@@ -252,6 +252,102 @@ def parse_formula_endpoint(body: dict):
     formula = body.get("formula", "")
     return parse_formula(formula)
 
+@app.post("/api/screener/explain")
+def explain_ticker(body: dict):
+    """Explain why a ticker passes or fails each filter clause in a formula."""
+    import yfinance as yf
+    import pandas as pd
+    import numpy as np
+    from screener import parse_formula, compute_indicators, apply_filters, _normalize_df
+
+    ticker_raw = body.get("ticker", "").upper().strip()
+    exchange   = body.get("exchange", "NSE")
+    formula    = body.get("formula", "")
+    as_of_date = body.get("as_of_date") or None
+
+    # Append exchange suffix
+    suffix = ".NS" if exchange in ("NSE", "BSE") else ""
+    ticker = ticker_raw + suffix if not ticker_raw.endswith(suffix) else ticker_raw
+
+    # Download fresh data for this one ticker
+    try:
+        raw = yf.download(ticker, period="1y", interval="1d",
+                          auto_adjust=True, progress=False)
+    except Exception as e:
+        return {"error": f"Download failed: {e}"}
+
+    df = _normalize_df(raw, ticker) if isinstance(raw.columns, pd.MultiIndex) else (
+        lambda: (
+            setattr(raw, "columns", raw.columns.get_level_values(0))
+            or raw.dropna(subset=["Open","High","Low","Close"])
+        )()
+    )
+    # Simpler: just clean the raw df directly for single-ticker download
+    if df is None:
+        try:
+            r = raw.copy()
+            if isinstance(r.columns, pd.MultiIndex):
+                r.columns = r.columns.get_level_values(-1)
+            r = r[["Open","High","Low","Close","Volume"]].dropna(subset=["Open","High","Low","Close"])
+            df = r if len(r) >= 30 else None
+        except Exception:
+            pass
+    if df is None:
+        return {"error": f"No usable data for {ticker}"}
+
+    ind = compute_indicators(ticker, df, as_of_date=as_of_date)
+    if ind is None:
+        return {"error": f"compute_indicators returned None — not enough history"}
+
+    filters = parse_formula(formula) if formula else {}
+
+    # Evaluate each filter key individually
+    checks = {}
+    from screener import _eval_sma, _eval_ema
+    import re as _r
+
+    def chk(key, val):
+        p = ind["price"]
+        if key == "price_min":      return p >= val
+        if key == "price_max":      return p <= val
+        if key == "change_pct_min": return (ind.get("change_pct") or 0) >= val
+        if key == "change_pct_max": return (ind.get("change_pct") or 0) <= val
+        if key == "volume_min":     return (ind.get("volume") or 0) >= val
+        if key == "rsi_min":        return (ind.get("rsi") or 0) >= val
+        if key == "rsi_max":        return (ind.get("rsi") or 100) <= val
+        if key == "dollar_vol_min": return (ind.get("dollar_vol_20") or 0) >= val
+        if key == "dollar_vol_50_min": return (ind.get("dollar_vol_50") or 0) >= val
+        if key == "atr_ratio_min":  return (ind.get("atr_ratio") or 0) >= val
+        if key == "candle_pos_min": return (ind.get("candle_pos") or 0) >= val
+        if key == "new_52w_high":   return bool(ind.get("new_52w_high"))
+        if key == "sma_conditions":
+            return {c: _eval_sma(ind, c) for c in val}
+        if key.startswith("not_price_below_sma"):
+            m = _r.match(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)', key)
+            if m:
+                n_s, bars_s = int(m.group(1)), int(m.group(2))
+                sma_val  = ind.get(f"sma{n_s}")
+                trend_dn = ind.get(f"sma{n_s}_trend_dn_{bars_s}", False)
+                pb = sma_val is not None and p < sma_val
+                return {"price_below_sma": pb, "sma_trend_dn": trend_dn, "pass": not (pb and trend_dn)}
+        if "_trend_dn_" in key or "_trend_up_" in key:
+            return bool(ind.get(key))
+        return "—"
+
+    for k, v in filters.items():
+        checks[k] = {"required": v, "result": chk(k, v)}
+
+    # Key indicator snapshot
+    snapshot = {k: ind.get(k) for k in [
+        "price","change_pct","sma10","sma20","sma50","sma200",
+        "rsi","dollar_vol_20","dollar_vol_50","atr_ratio","candle_pos",
+        "sma50_trend_dn_20","new_52w_high","last_date"
+    ]}
+    overall = apply_filters(ind, filters)
+
+    return {"ticker": ticker, "overall_pass": overall,
+            "snapshot": snapshot, "filter_checks": checks}
+
 @app.delete("/api/screener/cache")
 def clear_ohlcv_cache(exchange: Optional[str] = None):
     """Delete cached OHLCV pickle files so the next run re-downloads."""
