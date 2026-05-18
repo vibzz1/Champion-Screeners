@@ -1466,52 +1466,95 @@ def _is_market_open(exchange: str) -> bool:
 
 
 def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
-    """Single NSE API call → live OHLCV for all tickers (via nselib)."""
+    """Live OHLCV for NSE tickers.
+    Primary: nselib market_watch (real-time, single API call).
+    Fallback: yfinance period=5d interval=1d (today's partial bar, batch download).
+    """
     result: Dict[str, Dict] = {}
+
+    # ── Primary: nselib ───────────────────────────────────────────────────────
     try:
-        from nselib import capital_market          # lazy import
+        from nselib import capital_market
         df = capital_market.market_watch_all_stocks()
         df.columns = [str(c).strip() for c in df.columns]
 
         def _col(*names):
             for n in names:
-                if n in df.columns:
-                    return n
+                if n in df.columns: return n
             return None
 
-        sym_col   = _col("symbol",             "Symbol",   "SYMBOL")
-        open_col  = _col("open",               "Open",     "openPrice")
-        high_col  = _col("dayHigh",            "High",     "highPrice")
-        low_col   = _col("dayLow",             "Low",      "lowPrice")
-        close_col = _col("lastPrice",          "LTP",      "ltp",   "closePrice")
-        vol_col   = _col("totalTradedVolume",  "Volume",   "tradedQuantity")
+        sym_col   = _col("symbol",            "Symbol",  "SYMBOL")
+        open_col  = _col("open",              "Open",    "openPrice")
+        high_col  = _col("dayHigh",           "High",    "highPrice")
+        low_col   = _col("dayLow",            "Low",     "lowPrice")
+        close_col = _col("lastPrice",         "LTP",     "ltp",  "closePrice")
+        vol_col   = _col("totalTradedVolume", "Volume",  "tradedQuantity")
 
-        if not all([sym_col, open_col, high_col, low_col, close_col, vol_col]):
-            print(f"[screener] NSE live: unrecognised columns {list(df.columns)}")
-            return result
-
-        ticker_set = set(tickers)
-        for _, row in df.iterrows():
-            sym      = str(row[sym_col]).strip()
-            ns_tick  = f"{sym}.NS"
-            if ns_tick not in ticker_set:
-                continue
-            try:
-                result[ns_tick] = {
-                    "open":   float(row[open_col]),
-                    "high":   float(row[high_col]),
-                    "low":    float(row[low_col]),
-                    "close":  float(row[close_col]),
-                    "volume": int(float(str(row[vol_col]).replace(",", "").replace("–", "0") or 0)),
-                }
-            except (ValueError, TypeError):
-                continue
-
-        print(f"[screener] NSE live: {len(result)}/{len(tickers)} bars fetched")
+        if all([sym_col, open_col, high_col, low_col, close_col, vol_col]):
+            ticker_set = set(tickers)
+            for _, row in df.iterrows():
+                sym     = str(row[sym_col]).strip()
+                ns_tick = f"{sym}.NS"
+                if ns_tick not in ticker_set:
+                    continue
+                try:
+                    result[ns_tick] = {
+                        "open":   float(row[open_col]),
+                        "high":   float(row[high_col]),
+                        "low":    float(row[low_col]),
+                        "close":  float(row[close_col]),
+                        "volume": int(float(str(row[vol_col]).replace(",", "").replace("–", "0") or 0)),
+                    }
+                except (ValueError, TypeError):
+                    continue
+            print(f"[screener] NSE live (nselib): {len(result)}/{len(tickers)} bars")
+        else:
+            print(f"[screener] NSE live: nselib column mismatch {list(df.columns)[:6]}")
     except ImportError:
-        print("[screener] nselib not installed — run: pip install nselib")
+        print("[screener] nselib not available — using yfinance fallback")
     except Exception as e:
-        print(f"[screener] NSE live fetch error: {type(e).__name__}: {e}")
+        print(f"[screener] nselib error ({type(e).__name__}) — using yfinance fallback")
+
+    # ── Fallback: yfinance today's bars ───────────────────────────────────────
+    if not result:
+        print("[screener] NSE live fallback: yfinance period=5d …")
+        try:
+            today = datetime.date.today().isoformat()
+            batches = [tickers[i: i + 400] for i in range(0, len(tickers), 400)]
+            for batch in batches:
+                try:
+                    raw = yf.download(batch, period="5d", interval="1d",
+                                      auto_adjust=True, progress=False,
+                                      group_by="ticker", threads=True)
+                    if raw is None or raw.empty:
+                        continue
+                    for ticker in batch:
+                        try:
+                            df_t = _normalize_df(raw, ticker)
+                            if df_t is None or df_t.empty:
+                                continue
+                            # Only use if last row is today
+                            last_date = df_t.index[-1]
+                            if hasattr(last_date, 'tz') and last_date.tz:
+                                last_date = last_date.tz_localize(None)
+                            if str(last_date.date()) != today:
+                                continue
+                            row = df_t.iloc[-1]
+                            result[ticker] = {
+                                "open":   float(row["Open"]),
+                                "high":   float(row["High"]),
+                                "low":    float(row["Low"]),
+                                "close":  float(row["Close"]),
+                                "volume": int(float(row["Volume"])),
+                            }
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+            print(f"[screener] NSE live (yfinance fallback): {len(result)}/{len(tickers)} bars")
+        except Exception as e:
+            print(f"[screener] NSE live fallback error: {type(e).__name__}: {e}")
+
     return result
 
 
