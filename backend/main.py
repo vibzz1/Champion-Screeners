@@ -348,6 +348,24 @@ def explain_ticker(body: dict):
     return {"ticker": ticker, "overall_pass": overall,
             "snapshot": snapshot, "filter_checks": checks}
 
+@app.get("/api/screener/earnings")
+def get_earnings(symbols: str = ""):
+    """Return next board-meeting / earnings dates for NSE symbols (comma-separated).
+    Sourced from NSE official event calendar, cached 12 h. Returns '' for unknown symbols."""
+    from earnings import get_earnings_calendar
+    if not symbols.strip():
+        return {}
+    calendar = get_earnings_calendar()
+    result = {}
+    for raw in symbols.split(","):
+        t = raw.strip()
+        if not t:
+            continue
+        clean = t.replace(".NS", "").replace(".BO", "").upper()
+        result[t] = calendar.get(clean, "")
+    return result
+
+
 @app.delete("/api/screener/cache")
 def clear_ohlcv_cache(exchange: Optional[str] = None):
     """Delete cached OHLCV pickle files so the next run re-downloads."""

@@ -285,6 +285,21 @@ function fmtCap(cap: number|null, exchange: string) {
 }
 function fmtVol(v: number) { return v>=1_000_000?`${(v/1_000_000).toFixed(1)}M`:v>=1000?`${(v/1000).toFixed(0)}K`:`${v}`; }
 
+function fmtEarnings(dateStr: string): string {
+  if(!dateStr) return "—";
+  const d = new Date(dateStr.replace(/-/g," "));
+  if(isNaN(d.getTime())) return dateStr;
+  const mon=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${d.getDate()} ${mon[d.getMonth()]}`;
+}
+function earningsColor(dateStr: string): string {
+  if(!dateStr) return "#9ca3af";
+  const d = new Date(dateStr.replace(/-/g," "));
+  if(isNaN(d.getTime())) return "#374151";
+  const days = Math.ceil((d.getTime()-Date.now())/86400000);
+  return days<=14 ? "#d97706" : "#374151";
+}
+
 // ── Formula Editor ─────────────────────────────────────────────────────────
 function FormulaEditor({
   initial, onRun, onSave, onCancel,
@@ -445,6 +460,7 @@ export default function ScreenerPage() {
   const [favorites, setFavorites]    = useState<Record<string, Result>>({});
   const [showFavorites, setShowFavorites] = useState(false);
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
+  const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -566,6 +582,19 @@ export default function ScreenerPage() {
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
   const favPaged     = favResults.slice((page-1)*pageSize, page*pageSize);
+
+  // Earnings — fetch from NSE for the current visible page only
+  const pagedTickers = useMemo(
+    ()=>(showFavorites ? favPaged : paged).map(r=>r.ticker).join(","),
+    [showFavorites, favPaged, paged]
+  );
+  useEffect(()=>{
+    if(!pagedTickers) return;
+    fetch(`${API}/api/screener/earnings?symbols=${encodeURIComponent(pagedTickers)}`)
+      .then(r=>r.ok?r.json():{})
+      .then(data=>setEarnings(prev=>({...prev,...data})))
+      .catch(()=>{});
+  },[pagedTickers]);
 
   function TH({label,k}:{label:string;k:string}) {
     const on=sortKey===k;
@@ -732,6 +761,7 @@ export default function ScreenerPage() {
                       <th className="border border-gray-200 px-2 py-1">SMA20</th>
                       <th className="border border-gray-200 px-2 py-1">SMA50</th>
                       <th className="border border-gray-200 px-2 py-1">% 52H</th>
+                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
                       <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
                     </tr>
                   </thead>
@@ -759,6 +789,7 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
+                        <td className="border border-gray-200 px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")}</td>
                         <td className="border border-gray-200 px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
                       </tr>;
                     })}
@@ -794,6 +825,7 @@ export default function ScreenerPage() {
                           <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
                           <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
                           <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
+                          {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
                         </div>
                       </div>
                       <InteractiveChart data={r.ohlcv} masterBars={masterZoom} />
@@ -897,6 +929,7 @@ export default function ScreenerPage() {
                       <TH label="SMA50" k="sma50"/>
                       <TH label="SMA200" k="sma200"/>
                       <TH label="% 52H" k="pct_from_52w_high"/>
+                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
                       <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
                     </tr>
                   </thead>
@@ -930,6 +963,7 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma200!=null&&r.price>r.sma200?"#16a34a":"#dc2626"}}>{r.sma200??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
+                        <td className="border border-gray-200 px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")}</td>
                         <td className="border border-gray-200 px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
                       </tr>;
                     })}
@@ -1000,6 +1034,7 @@ export default function ScreenerPage() {
                             <div className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></div>
                             <div className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></div>
                             <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
+                            {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
                           </div>
                         </div>
                         {/* Full-width interactive chart */}
