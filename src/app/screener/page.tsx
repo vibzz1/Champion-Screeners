@@ -60,7 +60,7 @@ const CHIPS = [
 function InteractiveChart({ data }: { data: OHLCV[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [w, setW]            = useState(800);
-  const [visibleBars, setVB] = useState(Math.min(60, data.length));
+  const [visibleBars, setVB] = useState(Math.min(69, data.length));
   const [rightOffset, setRO] = useState(0);
   const [showSma50, setS50]  = useState(false);
   const drag = useRef<{ startX: number; startRO: number } | null>(null);
@@ -234,6 +234,19 @@ function InteractiveChart({ data }: { data: OHLCV[] }) {
       {/* Controls */}
       <div className="flex items-center gap-3 px-3 pb-1 text-[10px] text-gray-400">
         <span>scroll=zoom · drag=pan</span>
+
+        {/* Zoom buttons */}
+        <div className="flex items-center border border-gray-200 rounded overflow-hidden">
+          <button
+            onClick={() => setVB(v => Math.min(total, Math.max(10, v + Math.max(1, Math.round(v * 0.1)))))}
+            className="px-2 py-0.5 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none border-r border-gray-200"
+            title="Zoom out">−</button>
+          <button
+            onClick={() => setVB(v => Math.min(total, Math.max(10, v - Math.max(1, Math.round(v * 0.1)))))}
+            className="px-2 py-0.5 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none"
+            title="Zoom in">+</button>
+        </div>
+
         <button onClick={() => setS50(v => !v)}
           className="ml-auto px-2 py-0.5 rounded border text-[10px]"
           style={{ borderColor: showSma50 ? "#3b82f6" : "#e5e7eb", color: showSma50 ? "#3b82f6" : "#aaa", backgroundColor: showSma50 ? "#eff6ff" : "white" }}>
