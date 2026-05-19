@@ -28,7 +28,8 @@ from typing import Optional, Dict, Any, List
 import pytz
 
 # Pre-compiled regex used in the hot apply_filters loop
-_NOT_BELOW_RE = _re_module.compile(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)')
+_NOT_BELOW_RE    = _re_module.compile(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)')
+_NOT_SMA_TREND_RE = _re_module.compile(r'not_sma(\d+)_trend_dn_\d+')
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
@@ -702,6 +703,12 @@ def parse_formula(formula: str) -> Dict:
                     result['sma_conditions'].append(cond)
                 matched = True
 
+            # !(sma(N) trend_dn M) — SMA must NOT be falling
+            elif (m := _re.match(r'!\s*\(?\s*sma\s*\(?\s*(\d+)\s*\)?\s*trend_dn\s+(\d+)\s*\)?', p)):
+                n_s, bars_s = m.group(1), m.group(2)
+                result[f'not_sma{n_s}_trend_dn_{bars_s}'] = True
+                matched = True
+
             # sma(N) trend_dn M — sma(N) now < sma(N) M bars ago (MIO trend direction)
             elif (m := _re.match(r'sma\s*\(?\s*(\d+)\s*\)?\s*trend_dn\s+(\d+)', p)):
                 n_s, bars_s = m.group(1), m.group(2)
@@ -1121,10 +1128,29 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
 
         # SMA trend: is sma(N) currently trending up or down vs M bars ago?
         # sma(50) trend_dn 20  →  sma50_now < sma50_20_bars_ago  (MIO semantics)
+        # We also check a 5-bar short slope: catches stocks that just started turning down
+        # (e.g. SMA20 peaked 5 bars ago and is now declining but still above 10-bar-ago value)
         sma50_series     = close.rolling(50).mean()
         sma50_20bars_ago = float(sma50_series.iloc[-21]) if len(sma50_series) >= 51 else None
-        sma50_trend_dn_20 = bool(sma50 is not None and sma50_20bars_ago is not None
-                                  and sma50 < sma50_20bars_ago)
+        sma50_5bars_ago  = float(sma50_series.iloc[-6])  if len(sma50_series) >= 56 else None
+        sma50_trend_dn_5  = bool(sma50 is not None and sma50_5bars_ago is not None
+                                  and sma50 < sma50_5bars_ago)
+        sma50_trend_dn_20 = bool(sma50 is not None and (
+            (sma50_20bars_ago is not None and sma50 < sma50_20bars_ago) or sma50_trend_dn_5
+        ))
+
+        # sma(20) trend direction: compare current sma20 to 10 bars ago
+        sma20_series     = close.rolling(20).mean()
+        sma20_10bars_ago = float(sma20_series.iloc[-11]) if len(sma20_series) >= 31 else None
+        sma20_5bars_ago  = float(sma20_series.iloc[-6])  if len(sma20_series) >= 26 else None
+        sma20_trend_dn_5  = bool(sma20 is not None and sma20_5bars_ago is not None
+                                  and sma20 < sma20_5bars_ago)
+        sma20_trend_dn_10 = bool(sma20 is not None and (
+            (sma20_10bars_ago is not None and sma20 < sma20_10bars_ago) or sma20_trend_dn_5
+        ))
+        sma20_trend_dn_20 = bool(sma20 is not None and (
+            (len(sma20_series) >= 41 and sma20 < float(sma20_series.iloc[-21])) or sma20_trend_dn_5
+        ))
 
         # Relative volume: today's volume vs 20-day average
         rvol = _sf(float(vol.iloc[-1]) / avg_vol_20, 2) if avg_vol_20 > 0 else None
@@ -1225,7 +1251,11 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             "candle_pos":        candle_pos,
             "dollar_vol_20":     dollar_vol_20,
             "dollar_vol_50":     dollar_vol_50,
+            "sma50_trend_dn_5":  sma50_trend_dn_5,
             "sma50_trend_dn_20": sma50_trend_dn_20,
+            "sma20_trend_dn_5":  sma20_trend_dn_5,
+            "sma20_trend_dn_10": sma20_trend_dn_10,
+            "sma20_trend_dn_20": sma20_trend_dn_20,
             "rvol":              rvol,
             "gap_pct":           gap_pct,
             "offh_21":           offh_21,
@@ -1279,9 +1309,7 @@ def _eval_sma(ind: Dict, cond: str) -> bool:
         n1, d, n2 = int(m.group(1)), m.group(2), int(m.group(3))
         v1, v2 = ind.get(f"sma{n1}"), ind.get(f"sma{n2}")
         if v1 is None or v2 is None: return False
-        # 1% tolerance: sma10 > sma20 passes even if sma10 is up to 1% below sma20
-        # (catches stocks mid-crossover where SMAs are essentially equal)
-        return v1 > v2 * 0.99 if d == 'above' else v1 < v2 * 1.01
+        return v1 > v2 if d == 'above' else v1 < v2
     return True  # unknown condition — pass through
 
 def _eval_ema(ind: Dict, cond: str) -> bool:
@@ -1298,8 +1326,7 @@ def _eval_ema(ind: Dict, cond: str) -> bool:
         n1, d, n2 = int(m.group(1)), m.group(2), int(m.group(3))
         v1, v2 = ind.get(f"ema{n1}"), ind.get(f"ema{n2}")
         if v1 is None or v2 is None: return False
-        # 1% tolerance: same as SMA — catches mid-crossover stocks
-        return v1 > v2 * 0.99 if d == 'above' else v1 < v2 * 1.01
+        return v1 > v2 if d == 'above' else v1 < v2
     return True  # unknown condition — pass through
 
 # ── Filter Application ─────────────────────────────────────────────────────
@@ -1415,9 +1442,24 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
                 if sma_val is not None and ind["price"] < sma_val and trend_dn:
                     return False
 
+    # !(sma(N) trend_dn M) — SMA must NOT be falling: reject if it IS falling
+    # Also checks the precomputed 5-bar short slope so stocks that just started turning
+    # down are caught even when sma_now > sma_M_bars_ago (peaked recently, M-bar still net up)
+    for fkey, fval in f.items():
+        if fval is True and fkey.startswith('not_sma') and '_trend_dn_' in fkey:
+            actual_key = fkey[4:]  # strip leading "not_" → e.g. sma20_trend_dn_10
+            if ind.get(actual_key, False):
+                return False
+            # Short-slope safety net: also reject if SMA declined over last 5 bars
+            sma_n_match = _NOT_SMA_TREND_RE.match(fkey)
+            if sma_n_match:
+                short_key = f"sma{sma_n_match.group(1)}_trend_dn_5"
+                if ind.get(short_key, False):
+                    return False
+
     # SMA trend direction — any sma{N}_trend_dn_{M} or sma{N}_trend_up_{M} key
     for fkey, fval in f.items():
-        if fval is True and ('_trend_dn_' in fkey or '_trend_up_' in fkey) and not fkey.startswith('not_price_below_sma'):
+        if fval is True and ('_trend_dn_' in fkey or '_trend_up_' in fkey) and not fkey.startswith('not_'):
             if not ind.get(fkey): return False
 
     # Relative volume

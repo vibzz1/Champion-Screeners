@@ -35,12 +35,12 @@ interface Result {
 
 // ── Default screeners ──────────────────────────────────────────────────────
 const DEFAULTS: SavedScreener[] = [
-  { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50)) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d2", name: "NPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_dn 1" },
   { id: "d3", name: "PPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (price > sma(100) or price > sma(200)) and (pgo(50) < 4 or pgo(20) < 4) and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_up 1" },
-  { id: "d4", name: "US Setup Scan",        exchange: "SP500", formula: "advol(20) > 20 and price > 10 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d5", name: "India Setup Scan 75m", exchange: "NSE",   interval: "75min", formula: "advol(20) > 40 and price > 10 and price < 10000 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d6", name: "US Setup Scan 78m",    exchange: "SP500", interval: "78min", formula: "advol(20) > 4 and price > 10 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d4", name: "US Setup Scan",        exchange: "SP500", formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d5", name: "India Setup Scan 75m", exchange: "NSE",   interval: "75min", formula: "advol(20) > 40 and advol(50) > 40 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d6", name: "US Setup Scan 78m",    exchange: "SP500", interval: "78min", formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
 ];
 
 // ── Quick-add chips ────────────────────────────────────────────────────────
@@ -442,6 +442,11 @@ export default function ScreenerPage() {
   const [pageSize, setPageSize]     = useState(20);
   const [asOfDate, setAsOfDate]      = useState("");
   const [isLive, setIsLive]          = useState(false);
+  const [favorites, setFavorites]    = useState<Record<string, Result>>({});
+  const [showFavorites, setShowFavorites] = useState(false);
+  const [favView, setFavView]        = useState<"overview"|"charts">("overview");
+  const FAV_KEY = "mio_favorites_v1";
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // ── Persistence ──────────────────────────────────────────────────────────
   // Built-ins (d1–d6) always come from DEFAULTS in code — never from localStorage.
@@ -457,6 +462,23 @@ export default function ScreenerPage() {
       setScreeners([...DEFAULTS, ...custom]);
     } catch { setScreeners(DEFAULTS); }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FAV_KEY);
+      if (raw) setFavorites(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  function toggleFavorite(r: Result) {
+    setFavorites(prev => {
+      const next = { ...prev };
+      if (next[r.ticker]) delete next[r.ticker];
+      else next[r.ticker] = r;
+      localStorage.setItem(FAV_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
 
   function persist(list: SavedScreener[]) {
     setScreeners(list);
@@ -481,6 +503,7 @@ export default function ScreenerPage() {
   const runScreen = useCallback(async (s: SavedScreener, histDate: string = "") => {
     setActive(s);
     setEditing(null);
+    setShowFavorites(false);
     setLoading(true);
     setError("");
     setWarning("");
@@ -537,6 +560,12 @@ export default function ScreenerPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
   const paged      = filtered.slice((page-1)*pageSize, page*pageSize);
   useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize]);
+  useEffect(()=>{setPage(1);},[showFavorites]);
+  useEffect(()=>{ if(resultsRef.current) resultsRef.current.scrollTop=0; },[page]);
+
+  const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
+  const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
+  const favPaged     = favResults.slice((page-1)*pageSize, page*pageSize);
 
   function TH({label,k}:{label:string;k:string}) {
     const on=sortKey===k;
@@ -547,24 +576,24 @@ export default function ScreenerPage() {
     </th>;
   }
 
-  function Pagination() {
-    if(filtered.length===0) return null;
+  function Pagination({ count, total }: { count: number; total: number }) {
+    if(count===0) return null;
     return <div className="flex items-center justify-between px-3 py-2 border-t border-gray-200 bg-white text-xs sticky bottom-0">
       <div className="flex items-center gap-2 text-gray-500">
-        <span>{(page-1)*pageSize+1}–{Math.min(page*pageSize,filtered.length)} of {filtered.length}</span>
+        <span>{(page-1)*pageSize+1}–{Math.min(page*pageSize,count)} of {count}</span>
         <select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value));}}
           className="border border-gray-200 rounded px-1 py-0.5 text-[11px] bg-white ml-1">
           {PAGE_SIZES.map(s=><option key={s} value={s}>{s} / page</option>)}
         </select>
       </div>
-      {totalPages>1 && <div className="flex gap-1">
+      {total>1 && <div className="flex gap-1">
         <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>◀</button>
-        {Array.from({length:Math.min(totalPages,7)},(_,i)=>{
-          const p=totalPages<=7?i+1:page<=4?i+1:page>=totalPages-3?totalPages-6+i:page-3+i;
+        {Array.from({length:Math.min(total,7)},(_,i)=>{
+          const p=total<=7?i+1:page<=4?i+1:page>=total-3?total-6+i:page-3+i;
           return <button key={p} onClick={()=>setPage(p)} className="w-6 h-5 rounded text-center"
             style={{backgroundColor:page===p?"#003366":undefined,color:page===p?"white":"#003399",border:page===p?"none":"1px solid #d1d5db"}}>{p}</button>;
         })}
-        <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
+        <button onClick={()=>setPage(p=>Math.min(total,p+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
       </div>}
     </div>;
   }
@@ -582,6 +611,16 @@ export default function ScreenerPage() {
             className="w-full py-1.5 rounded text-white text-xs font-semibold"
             style={{backgroundColor:"#003366"}}>
             + New Setup Scan
+          </button>
+          <button
+            onClick={()=>setShowFavorites(v=>!v)}
+            className="w-full py-1.5 rounded text-xs font-semibold border flex items-center justify-center gap-1"
+            style={{
+              backgroundColor: showFavorites ? "#fef3c7" : "white",
+              borderColor: showFavorites ? "#f59e0b" : "#d1d5db",
+              color: showFavorites ? "#b45309" : "#374151",
+            }}>
+            {showFavorites ? "★" : "☆"} Favorites ({Object.keys(favorites).length})
           </button>
           {/* Historical date picker */}
           <div>
@@ -649,8 +688,126 @@ export default function ScreenerPage() {
           />
         )}
 
+        {/* Favorites view */}
+        {!showEditor && showFavorites && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-gray-200 bg-white text-xs flex items-center gap-2">
+              <span className="font-bold text-amber-500">★ Favorites</span>
+              <span className="text-gray-300">·</span>
+              <span className="text-gray-500">{favResults.length} saved</span>
+              {favResults.length > 0 && (
+                <div className="ml-auto flex rounded overflow-hidden border border-gray-200">
+                  {(["overview","charts"] as const).map(v=>(
+                    <button key={v} onClick={()=>setFavView(v)} className="px-2 py-0.5 text-[11px] capitalize"
+                      style={{backgroundColor:favView===v?"#003366":"white",color:favView===v?"white":"#003399",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {favResults.length === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 text-gray-400">
+                <div className="text-4xl mb-3">☆</div>
+                <div className="text-sm font-medium">No favorites yet</div>
+                <div className="text-xs mt-1 text-gray-300">Click ☆ on any stock in a scan to save it here</div>
+              </div>
+            )}
+            {favResults.length > 0 && favView === "overview" && (
+              <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
+                <table className="text-xs border-collapse w-full">
+                  <thead>
+                    <tr className="bg-gray-50 sticky top-0 z-10">
+                      <th className="border border-gray-200 px-1 py-1 w-6 text-center text-gray-400">★</th>
+                      <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
+                      <th className="border border-gray-200 px-2 py-1 text-left">Symbol</th>
+                      <th className="border border-gray-200 px-2 py-1">Company</th>
+                      <th className="border border-gray-200 px-2 py-1">Sector</th>
+                      <th className="border border-gray-200 px-2 py-1">Cap</th>
+                      <th className="border border-gray-200 px-2 py-1">Price</th>
+                      <th className="border border-gray-200 px-2 py-1">Chg %</th>
+                      <th className="border border-gray-200 px-2 py-1">Volume</th>
+                      <th className="border border-gray-200 px-2 py-1">RSI</th>
+                      <th className="border border-gray-200 px-2 py-1">MACD</th>
+                      <th className="border border-gray-200 px-2 py-1">SMA20</th>
+                      <th className="border border-gray-200 px-2 py-1">SMA50</th>
+                      <th className="border border-gray-200 px-2 py-1">% 52H</th>
+                      <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {favPaged.map((r,idx)=>{
+                      const up=(r.change_pct??0)>=0;
+                      const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                      return <tr key={r.ticker} className="hover:bg-amber-50 border-b border-gray-100">
+                        <td className="border border-gray-200 px-1 py-1 text-center">
+                          <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
+                            className="text-base leading-none" style={{color:"#f59e0b"}}>★</button>
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1 text-gray-400">{(page-1)*pageSize+idx+1}</td>
+                        <td className="border border-gray-200 px-2 py-1 font-bold whitespace-nowrap" style={{color:"#003399"}}>
+                          {r.symbol}{r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
+                        <td className="border border-gray-200 px-2 py-1"><span className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px]">{r.sector}</span></td>
+                        <td className="border border-gray-200 px-2 py-1"><span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span></td>
+                        <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums">{r.price?.toLocaleString()}</td>
+                        <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums text-gray-600">{fmtVol(r.volume)}</td>
+                        <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
+                        <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
+                        <td className="border border-gray-200 px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
+                <Pagination count={favResults.length} total={favTotalPages}/>
+              </div>
+            )}
+            {favResults.length > 0 && favView === "charts" && (
+              <div ref={resultsRef} className="flex-1 overflow-auto p-3 flex flex-col gap-3">
+                {favPaged.map(r=>{
+                  const up=(r.change_pct??0)>=0;
+                  const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                  return (
+                    <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm overflow-hidden w-full">
+                      <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
+                        <div className="flex items-center gap-2 min-w-[120px]">
+                          <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
+                            className="text-xl leading-none shrink-0" style={{color:"#f59e0b"}}>★</button>
+                          <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
+                          {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
+                          <span className="text-[11px] text-gray-400">{r.sector} · {r.industry}</span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
+                          <div className="text-sm font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                        </div>
+                        <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
+                          <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
+                          <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
+                          <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
+                        </div>
+                      </div>
+                      <InteractiveChart data={r.ohlcv} masterBars={masterZoom} />
+                    </div>
+                  );
+                })}
+                <Pagination count={favResults.length} total={favTotalPages}/>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Results */}
-        {!showEditor && (
+        {!showEditor && !showFavorites && (
           <>
             {/* Toolbar */}
             <div className="px-3 py-1.5 border-b border-gray-200 bg-white text-xs flex items-center gap-2 flex-wrap">
@@ -719,10 +876,11 @@ export default function ScreenerPage() {
 
             {/* ── Overview table ─────────────────────────────────────────── */}
             {!loading && results.length>0 && view==="overview" && (
-              <div className="flex-1 overflow-auto flex flex-col">
+              <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
                 <table className="text-xs border-collapse w-full">
                   <thead>
                     <tr className="bg-gray-50 sticky top-0 z-10">
+                      <th className="border border-gray-200 px-1 py-1 w-6 text-center text-gray-400">★</th>
                       <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
                       <TH label="Symbol" k="symbol"/>
                       <th className="border border-gray-200 px-2 py-1">Company</th>
@@ -747,6 +905,13 @@ export default function ScreenerPage() {
                       const up=(r.change_pct??0)>=0;
                       const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                       return <tr key={r.ticker} className="hover:bg-blue-50 border-b border-gray-100">
+                        <td className="border border-gray-200 px-1 py-1 text-center">
+                          <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
+                            className="text-base leading-none transition-colors"
+                            style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
+                            {favorites[r.ticker] ? "★" : "☆"}
+                          </button>
+                        </td>
                         <td className="border border-gray-200 px-2 py-1 text-gray-400">{(page-1)*pageSize+idx+1}</td>
                         <td className="border border-gray-200 px-2 py-1 font-bold whitespace-nowrap" style={{color:"#003399"}}>
                           {r.symbol}{r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
@@ -770,13 +935,13 @@ export default function ScreenerPage() {
                     })}
                   </tbody>
                 </table>
-                <Pagination/>
+                <Pagination count={filtered.length} total={totalPages}/>
               </div>
             )}
 
             {/* ── Charts view — 1 card per row, full width ──────────────── */}
             {!loading && results.length>0 && view==="charts" && (
-              <div className="flex-1 overflow-auto flex flex-col">
+              <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
                 {/* Master zoom bar */}
                 <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
                   <span className="text-xs text-gray-500 font-medium">Zoom all charts</span>
@@ -805,8 +970,13 @@ export default function ScreenerPage() {
                       <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden w-full">
                         {/* Header row */}
                         <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
-                          {/* Symbol + badges */}
+                          {/* Star + Symbol + badges */}
                           <div className="flex items-center gap-2 min-w-[120px]">
+                            <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
+                              className="text-xl leading-none transition-colors shrink-0"
+                              style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
+                              {favorites[r.ticker] ? "★" : "☆"}
+                            </button>
                             <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
                             {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
                             <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
@@ -838,7 +1008,7 @@ export default function ScreenerPage() {
                     );
                   })}
                 </div>
-                <Pagination/>
+                <Pagination count={filtered.length} total={totalPages}/>
               </div>
             )}
 
