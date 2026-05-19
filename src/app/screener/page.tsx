@@ -57,10 +57,15 @@ const CHIPS = [
 ];
 
 // ── Interactive candlestick chart with SMA20/50, volume, zoom + pan ────────
-function InteractiveChart({ data }: { data: OHLCV[] }) {
+function InteractiveChart({ data, masterBars }: { data: OHLCV[]; masterBars?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [w, setW]            = useState(800);
-  const [visibleBars, setVB] = useState(Math.min(69, data.length));
+  const [visibleBars, setVB] = useState(Math.min(masterBars ?? 69, data.length));
+
+  // Sync to master zoom when it changes
+  useEffect(() => {
+    if (masterBars != null) setVB(Math.min(masterBars, data.length));
+  }, [masterBars, data.length]);
   const [rightOffset, setRO] = useState(0);
   const [showSma50, setS50]  = useState(false);
   const drag = useRef<{ startX: number; startRO: number } | null>(null);
@@ -425,6 +430,7 @@ export default function ScreenerPage() {
   const [active, setActive]         = useState<SavedScreener | null>(null);
   const [results, setResults]       = useState<Result[]>([]);
   const [loading, setLoading]       = useState(false);
+  const [masterZoom, setMasterZoom] = useState(69); // shared bars-visible for all charts
   const [error, setError]           = useState("");
   const [warning, setWarning]       = useState("");
   const [view, setView]             = useState<"overview"|"charts">("overview");
@@ -771,6 +777,26 @@ export default function ScreenerPage() {
             {/* ── Charts view — 1 card per row, full width ──────────────── */}
             {!loading && results.length>0 && view==="charts" && (
               <div className="flex-1 overflow-auto flex flex-col">
+                {/* Master zoom bar */}
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
+                  <span className="text-xs text-gray-500 font-medium">Zoom all charts</span>
+                  <div className="flex items-center border border-gray-300 rounded overflow-hidden">
+                    <button
+                      onClick={() => setMasterZoom(v => Math.min(300, v + Math.max(1, Math.round(v * 0.15))))}
+                      className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-r border-gray-300 transition-colors"
+                      title="Zoom out all charts">−</button>
+                    <span className="px-2 text-xs text-gray-500 tabular-nums min-w-[40px] text-center">{masterZoom}b</span>
+                    <button
+                      onClick={() => setMasterZoom(v => Math.max(10, v - Math.max(1, Math.round(v * 0.15))))}
+                      className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-l border-gray-300 transition-colors"
+                      title="Zoom in all charts">+</button>
+                  </div>
+                  <button
+                    onClick={() => setMasterZoom(69)}
+                    className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded border border-gray-200 hover:border-gray-300 transition-colors">
+                    Reset
+                  </button>
+                </div>
                 <div className="p-3 flex flex-col gap-3">
                   {paged.map(r=>{
                     const up=(r.change_pct??0)>=0;
@@ -807,7 +833,7 @@ export default function ScreenerPage() {
                           </div>
                         </div>
                         {/* Full-width interactive chart */}
-                        <InteractiveChart data={r.ohlcv} />
+                        <InteractiveChart data={r.ohlcv} masterBars={masterZoom} />
                       </div>
                     );
                   })}
