@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE"];
@@ -577,11 +577,12 @@ export default function ScreenerPage() {
   const paged      = filtered.slice((page-1)*pageSize, page*pageSize);
   useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize]);
   useEffect(()=>{setPage(1);},[showFavorites]);
-  useLayoutEffect(()=>{
+  function goToPage(p: number) {
+    window.scrollTo(0, 0);
+    if (resultsRef.current) resultsRef.current.scrollTop = 0;
     (document.activeElement as HTMLElement)?.blur();
-    if(resultsRef.current) resultsRef.current.scrollTop=0;
-    window.scrollTo(0,0);
-  },[page]);
+    setPage(p);
+  }
 
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
@@ -620,13 +621,13 @@ export default function ScreenerPage() {
         </select>
       </div>
       {total>1 && <div className="flex gap-1">
-        <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>◀</button>
+        <button onClick={()=>goToPage(Math.max(1,page-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>◀</button>
         {Array.from({length:Math.min(total,7)},(_,i)=>{
           const p=total<=7?i+1:page<=4?i+1:page>=total-3?total-6+i:page-3+i;
-          return <button key={p} onClick={()=>setPage(p)} className="w-6 h-5 rounded text-center"
+          return <button key={p} onClick={()=>goToPage(p)} className="w-6 h-5 rounded text-center"
             style={{backgroundColor:page===p?"#003366":undefined,color:page===p?"white":"#003399",border:page===p?"none":"1px solid #d1d5db"}}>{p}</button>;
         })}
-        <button onClick={()=>setPage(p=>Math.min(total,p+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
+        <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
       </div>}
     </div>;
   }
