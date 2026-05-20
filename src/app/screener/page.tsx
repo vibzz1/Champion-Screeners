@@ -578,10 +578,14 @@ export default function ScreenerPage() {
   useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize]);
   useEffect(()=>{setPage(1);},[showFavorites]);
   function goToPage(p: number) {
-    window.scrollTo(0, 0);
-    if (resultsRef.current) resultsRef.current.scrollTop = 0;
     (document.activeElement as HTMLElement)?.blur();
     setPage(p);
+    // Double rAF: wait for React to commit + browser scroll-anchoring to settle,
+    // then force scroll to top. This reliably overrides Chrome's scroll anchoring.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      if (resultsRef.current) resultsRef.current.scrollTop = 0;
+    }));
   }
 
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
