@@ -1,0 +1,23 @@
+[Unit]
+Description=Champion Screener FastAPI Backend
+After=network.target
+
+[Service]
+User=screener
+WorkingDirectory=/home/screener/app/backend
+Environment="PATH=/home/screener/app/backend/venv/bin"
+
+# Angel One credentials — fill these in
+Environment="ANGEL_CLIENT_ID=V119180"
+Environment="ANGEL_PIN=1235"
+Environment="ANGEL_TOTP_SECRET=ANOTHBL5HZBJ7YBP6C2SFWEL3U"
+Environment="ANGEL_API_KEY=AgqDUsEv"
+
+ExecStart=/home/screener/app/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
