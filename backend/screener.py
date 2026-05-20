@@ -510,13 +510,13 @@ def parse_formula(formula: str) -> Dict:
     parts = _split_and(text)
 
     # Clauses that reference MIO-specific functions we intentionally skip
-    # (exchange selector handles exch(); lookback @{} notation not supported)
-    _SKIP = _re.compile(
-        r'^exch\s*\(|'            # exch(nse) — handled by exchange selector
-        r'@\{'                     # lookback periods @{0..20}
-    )
+    # (exchange selector handles exch(); lookback @{} notation is stripped then re-parsed)
+    _SKIP = _re.compile(r'^exch\s*\(')   # exch(nse) — handled by exchange selector
 
     for raw in parts:
+        # Strip MIO lookback modifier @{N..M} — treat condition as current-state check
+        raw = _re.sub(r'@\{\s*\d+\s*\.\.\s*\d+\s*\}', '', raw)
+
         # Strip at most one layer of enclosing parentheses (not all)
         _r = raw.strip()
         p = _r[1:-1].strip() if _r.startswith('(') and _r.endswith(')') else _r
