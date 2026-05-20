@@ -929,40 +929,64 @@ def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Opti
         return None
 
 def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) -> Dict[str, pd.DataFrame]:
-    """Download 15-min OHLCV (60 days) and resample to bar_min-min bars; cache to disk."""
+    """Download 15-min OHLCV (60 days) and resample to bar_min-min bars; cache to disk.
+
+    For NSE/BSE: tries Angel One SmartAPI first; yfinance fallback for any missed symbols.
+    For US exchanges: yfinance only.
+    """
     cached = _load_intraday_cache(exchange, bar_min)
     if cached is not None:
         print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache")
         return cached
 
-    n_batches = (len(tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
-    print(f"[screener] {exchange} {bar_min}min: downloading {len(tickers)} tickers "
-          f"in {n_batches} batches (15m→{bar_min}m)…")
     data: Dict[str, pd.DataFrame] = {}
+    yf_tickers = list(tickers)   # shrinks as Angel One covers symbols
 
-    for i in range(0, len(tickers), DOWNLOAD_BATCH_INTRADAY):
-        batch = tickers[i : i + DOWNLOAD_BATCH_INTRADAY]
-        b_num = i // DOWNLOAD_BATCH_INTRADAY + 1
+    # ── Angel One first-pass (NSE/BSE only) ──────────────────────────────
+    if exchange in ("NSE", "BSE"):
         try:
-            raw = yf.download(
-                batch, period="60d", interval="15m", auto_adjust=True,
-                progress=False, group_by="ticker", threads=True,
-            )
-            if raw is None or raw.empty:
-                print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: empty")
-                continue
-            ok = 0
-            for ticker in batch:
-                df_15 = _normalize_df(raw, ticker)
-                if df_15 is None:
-                    continue
-                df_bar = _resample_intraday(df_15, exchange, bar_min)
-                if df_bar is not None:
-                    data[ticker] = df_bar
-                    ok += 1
-            print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
+            from angel_client import download_nse_ohlcv
+            angel_15m = download_nse_ohlcv(tickers, intraday=True, max_workers=6)
+            if angel_15m:
+                for ticker, df_15 in angel_15m.items():
+                    df_bar = _resample_intraday(df_15, exchange, bar_min)
+                    if df_bar is not None:
+                        data[ticker] = df_bar
+                covered = set(data.keys())
+                yf_tickers = [t for t in tickers if t not in covered]
+                print(f"[screener] Angel One {bar_min}min: {len(covered)}/{len(tickers)} covered; "
+                      f"{len(yf_tickers)} falling back to yfinance")
         except Exception as e:
-            print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
+            print(f"[screener] Angel One intraday skipped ({type(e).__name__}: {e}); using yfinance only")
+
+    # ── yfinance for remaining tickers ───────────────────────────────────
+    if yf_tickers:
+        n_batches = (len(yf_tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
+        print(f"[screener] {exchange} {bar_min}min (yfinance): downloading {len(yf_tickers)} tickers "
+              f"in {n_batches} batches (15m→{bar_min}m)…")
+        for i in range(0, len(yf_tickers), DOWNLOAD_BATCH_INTRADAY):
+            batch = yf_tickers[i : i + DOWNLOAD_BATCH_INTRADAY]
+            b_num = i // DOWNLOAD_BATCH_INTRADAY + 1
+            try:
+                raw = yf.download(
+                    batch, period="60d", interval="15m", auto_adjust=True,
+                    progress=False, group_by="ticker", threads=True,
+                )
+                if raw is None or raw.empty:
+                    print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: empty")
+                    continue
+                ok = 0
+                for ticker in batch:
+                    df_15 = _normalize_df(raw, ticker)
+                    if df_15 is None:
+                        continue
+                    df_bar = _resample_intraday(df_15, exchange, bar_min)
+                    if df_bar is not None:
+                        data[ticker] = df_bar
+                        ok += 1
+                print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
+            except Exception as e:
+                print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
 
     print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
     if len(data) >= max(20, len(tickers) * 0.3):
@@ -992,43 +1016,64 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
 
     Each stored DataFrame has flat columns [Open, High, Low, Close, Volume]
     with NaN rows already dropped — safe to iterate directly.
+
+    For NSE/BSE: tries Angel One SmartAPI first (400 days); yfinance fallback for any missed symbols.
+    For US exchanges: yfinance only.
     """
     cached = _load_ohlcv_cache(exchange)
     if cached is not None:
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
         return cached
 
-    batches = [tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(tickers), DOWNLOAD_BATCH)]
-    n_batches = len(batches)
-    print(f"[screener] {exchange}: downloading {len(tickers)} tickers in "
-          f"{n_batches} batches × {DOWNLOAD_WORKERS} parallel workers…")
     data: Dict[str, pd.DataFrame] = {}
+    yf_tickers = list(tickers)   # shrinks as Angel One covers symbols
 
-    def _fetch_batch(args):
-        b_num, batch = args
-        for attempt in range(1, 3):          # up to 2 attempts per batch
-            try:
-                raw = yf.download(
-                    batch, period="1y", auto_adjust=True,
-                    progress=False, group_by="ticker", threads=True,
-                )
-                if raw is None or raw.empty:
-                    print(f"[screener] batch {b_num}/{n_batches} attempt {attempt}: empty")
-                    continue
-                result = {}
-                for ticker in batch:
-                    df = _normalize_df(raw, ticker)
-                    if df is not None:
-                        result[ticker] = df
-                print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
-                return result
-            except Exception as e:
-                print(f"[screener] batch {b_num}/{n_batches} attempt {attempt} failed: {type(e).__name__}: {e}")
-        return {}  # both attempts failed
+    # ── Angel One first-pass (NSE/BSE only) ──────────────────────────────
+    if exchange in ("NSE", "BSE"):
+        try:
+            from angel_client import download_nse_ohlcv
+            angel_data = download_nse_ohlcv(tickers, intraday=False, max_workers=6)
+            if angel_data:
+                data.update(angel_data)
+                covered = set(angel_data.keys())
+                yf_tickers = [t for t in tickers if t not in covered]
+                print(f"[screener] Angel One daily: {len(covered)}/{len(tickers)} covered; "
+                      f"{len(yf_tickers)} falling back to yfinance")
+        except Exception as e:
+            print(f"[screener] Angel One daily skipped ({type(e).__name__}: {e}); using yfinance only")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-        for batch_data in pool.map(_fetch_batch, enumerate(batches, 1)):
-            data.update(batch_data)
+    # ── yfinance for remaining tickers ───────────────────────────────────
+    if yf_tickers:
+        batches = [yf_tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(yf_tickers), DOWNLOAD_BATCH)]
+        n_batches = len(batches)
+        print(f"[screener] {exchange} (yfinance): downloading {len(yf_tickers)} tickers in "
+              f"{n_batches} batches × {DOWNLOAD_WORKERS} parallel workers…")
+
+        def _fetch_batch(args):
+            b_num, batch = args
+            for attempt in range(1, 3):          # up to 2 attempts per batch
+                try:
+                    raw = yf.download(
+                        batch, period="1y", auto_adjust=True,
+                        progress=False, group_by="ticker", threads=True,
+                    )
+                    if raw is None or raw.empty:
+                        print(f"[screener] batch {b_num}/{n_batches} attempt {attempt}: empty")
+                        continue
+                    result = {}
+                    for ticker in batch:
+                        df = _normalize_df(raw, ticker)
+                        if df is not None:
+                            result[ticker] = df
+                    print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
+                    return result
+                except Exception as e:
+                    print(f"[screener] batch {b_num}/{n_batches} attempt {attempt} failed: {type(e).__name__}: {e}")
+            return {}  # both attempts failed
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+            for batch_data in pool.map(_fetch_batch, enumerate(batches, 1)):
+                data.update(batch_data)
 
     print(f"[screener] {exchange}: {len(data)} tickers downloaded — saving cache…")
     if len(data) >= max(50, len(tickers) * 0.5):

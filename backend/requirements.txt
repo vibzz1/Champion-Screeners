@@ -6,3 +6,5 @@ pandas
 numpy
 nselib
 pytz
+pyotp
+requests
