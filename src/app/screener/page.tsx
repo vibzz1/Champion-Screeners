@@ -633,6 +633,8 @@ export default function ScreenerPage() {
         })}
         <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
       </div>}
+      <button onClick={()=>window.scrollTo({top:0,behavior:"smooth"})}
+        className="px-2 py-0.5 border border-gray-300 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-50">↑ Top</button>
     </div>;
   }
 
