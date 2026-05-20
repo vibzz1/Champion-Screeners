@@ -490,6 +490,28 @@ def parse_formula(formula: str) -> Dict:
     unrecognized: list = []
     text = formula.lower().strip()
 
+    # ── Pre-processing ────────────────────────────────────────────────────────
+    # 1. Strip one layer of outer parens wrapping the entire formula
+    #    (MIO often wraps Block 1 in parentheses: "(exch(nse) and ...)")
+    _stripped = text
+    while _stripped.startswith('(') and _stripped.endswith(')'):
+        # Verify the parens are truly matching (not "(A) and (B)")
+        depth = 0
+        for i, ch in enumerate(_stripped):
+            if ch == '(': depth += 1
+            elif ch == ')': depth -= 1
+            if depth == 0 and i < len(_stripped) - 1:
+                break  # outer ( closes before the end — not a wrapper
+        else:
+            _stripped = _stripped[1:-1].strip()
+            break
+        break
+    text = _stripped
+
+    # 2. Normalise 'and' spacing — MIO sometimes writes "sma(10)and" without spaces
+    text = _re.sub(r'(?<![a-z0-9_])and(?![a-z0-9_])', ' and ', text)
+    text = _re.sub(r' {2,}', ' ', text).strip()  # collapse double spaces
+
     # Paren-aware split on ' and ' — don't break inside !(... and ...)
     def _split_and(s: str):
         clauses, depth, buf = [], 0, []
