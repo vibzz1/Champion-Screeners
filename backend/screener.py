@@ -1776,3 +1776,25 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     matched = [_enrich(r) for r in matched]
     matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
     return matched, bool(live_bars)
+
+
+def prewarm_ohlcv_cache(exchanges: List[str] = None) -> None:
+    """Pre-download OHLCV for given exchanges if today's cache is missing.
+    Safe to call any time — exits immediately if cache is already fresh.
+    Designed to run at market open so the first user scan is instant."""
+    if exchanges is None:
+        exchanges = ["NSE"]
+    for exchange in exchanges:
+        try:
+            tickers = UNIVERSES.get(exchange, [])
+            if not tickers:
+                continue
+            cached = _load_ohlcv_cache(exchange)
+            if cached is not None:
+                print(f"[prewarm] {exchange}: cache fresh ({len(cached)} tickers) — skip")
+                continue
+            print(f"[prewarm] {exchange}: cache stale — downloading {len(tickers)} tickers…")
+            _download_ohlcv(exchange, tickers)
+            print(f"[prewarm] {exchange}: done ✓")
+        except Exception as e:
+            print(f"[prewarm] {exchange} error: {type(e).__name__}: {e}")

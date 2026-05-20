@@ -6,13 +6,44 @@ from typing import Optional, List
 import random
 import math
 import os
+import threading
+import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+# ── Cache pre-warm scheduler ────────────────────────────────────────────────
+def _prewarm_background():
+    """Run prewarm in a daemon thread — won't block startup."""
+    try:
+        prewarm_ohlcv_cache(["NSE"])
+    except Exception as e:
+        print(f"[prewarm] background thread error: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    # 1. Pre-warm on startup (no-op if cache already fresh)
+    threading.Thread(target=_prewarm_background, daemon=True).start()
+
+    # 2. Schedule daily pre-warm at 8:00 AM IST (2:30 AM UTC) Mon–Fri
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        scheduler = BackgroundScheduler(timezone=pytz.utc)
+        scheduler.add_job(
+            _prewarm_background,
+            CronTrigger(hour=2, minute=30, day_of_week="mon-fri", timezone=pytz.utc),
+            id="nse_prewarm",
+            replace_existing=True,
+        )
+        scheduler.start()
+        print("[prewarm] Scheduler started — NSE cache warm daily at 08:00 IST (Mon–Fri)")
+    except Exception as e:
+        print(f"[prewarm] Scheduler setup failed: {e}")
 
 app.add_middleware(
     CORSMiddleware,

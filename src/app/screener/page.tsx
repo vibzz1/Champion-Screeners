@@ -577,7 +577,10 @@ export default function ScreenerPage() {
   const paged      = filtered.slice((page-1)*pageSize, page*pageSize);
   useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize]);
   useEffect(()=>{setPage(1);},[showFavorites]);
-  useEffect(()=>{ if(resultsRef.current) resultsRef.current.scrollTop=0; },[page]);
+  useEffect(()=>{
+    if(resultsRef.current) resultsRef.current.scrollTop=0;
+    window.scrollTo({top:0,behavior:"instant"});
+  },[page]);
 
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
