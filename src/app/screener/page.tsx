@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE"];
@@ -57,7 +57,7 @@ const CHIPS = [
 ];
 
 // ── Interactive candlestick chart with SMA20/50, volume, zoom + pan ────────
-function InteractiveChart({ data, masterBars }: { data: OHLCV[]; masterBars?: number }) {
+function InteractiveChart({ data, masterBars, priceHeight = 230 }: { data: OHLCV[]; masterBars?: number; priceHeight?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [w, setW]            = useState(800);
   const [visibleBars, setVB] = useState(Math.min(masterBars ?? 69, data.length));
@@ -71,8 +71,8 @@ function InteractiveChart({ data, masterBars }: { data: OHLCV[]; masterBars?: nu
   const drag = useRef<{ startX: number; startRO: number } | null>(null);
 
   // Layout constants
-  const PRICE_H = 230;   // height of price panel
-  const VOL_H   = 52;    // height of volume panel
+  const PRICE_H = priceHeight;  // height of price panel — controlled by parent
+  const VOL_H   = 52;           // height of volume panel
   const GAP     = 6;     // gap between panels
   const PAD = { t: 8, b: 22, l: 6, r: 58 };
   const TOTAL_H = PAD.t + PRICE_H + GAP + VOL_H + PAD.b;
@@ -461,8 +461,12 @@ export default function ScreenerPage() {
   const [showFavorites, setShowFavorites] = useState(false);
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
+  const [resultSearch, setRS]        = useState("");
+  const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
+  const [sidebarOpen, setSBO]        = useState(true);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
+  const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
 
   // ── Persistence ──────────────────────────────────────────────────────────
   // Built-ins (d1–d6) always come from DEFAULTS in code — never from localStorage.
@@ -573,10 +577,21 @@ export default function ScreenerPage() {
     if(capFilter!=="All"&&r.cap_size!==capFilter) return false;
     return true;
   }),[sorted,sectorFilter,capFilter]);
-  const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
-  const paged      = filtered.slice((page-1)*pageSize, page*pageSize);
-  useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize]);
+  const displayResults = useMemo(()=>{
+    const q = resultSearch.trim().toLowerCase();
+    return q ? filtered.filter(r=>r.symbol.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)) : filtered;
+  },[filtered,resultSearch]);
+  const totalPages = Math.max(1, Math.ceil(displayResults.length/pageSize));
+  const paged      = displayResults.slice((page-1)*pageSize, page*pageSize);
+  useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize,resultSearch]);
   useEffect(()=>{setPage(1);},[showFavorites]);
+
+  // Sector summary counts from full filtered set (not paged)
+  const sectorCounts = useMemo(()=>{
+    const m: Record<string,number> = {};
+    displayResults.forEach(r=>{ if(r.sector) m[r.sector]=(m[r.sector]||0)+1; });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  },[displayResults]);
   function goToPage(p: number) {
     (document.activeElement as HTMLElement)?.blur();
     setPage(p);
@@ -616,7 +631,7 @@ export default function ScreenerPage() {
 
   function Pagination({ count, total }: { count: number; total: number }) {
     if(count===0) return null;
-    return <div className="flex items-center justify-between px-3 py-2 border-t border-gray-200 bg-white text-xs sticky bottom-0">
+    return <div className="flex items-center justify-between px-3 py-2 bg-white text-xs sticky bottom-0 shadow-[0_-4px_12px_rgba(0,0,0,0.07)] border-t border-gray-100">
       <div className="flex items-center gap-2 text-gray-500">
         <span>{(page-1)*pageSize+1}–{Math.min(page*pageSize,count)} of {count}</span>
         <select value={pageSize} onChange={e=>{setPageSize(Number(e.target.value));}}
@@ -644,8 +659,14 @@ export default function ScreenerPage() {
     <div className="flex h-full" style={{minHeight:"calc(100vh - 48px)"}}>
 
       {/* ── Left panel ──────────────────────────────────────────────────── */}
-      <div className="w-56 shrink-0 border-r border-gray-200 bg-[#f8f9fb] flex flex-col">
-        <div className="px-3 py-3 border-b border-gray-200 bg-white space-y-2">
+      <div className={`${sidebarOpen?"w-56":"w-8"} shrink-0 border-r border-gray-200 bg-[#f8f9fb] flex flex-col transition-all duration-200 relative`}>
+        {/* Collapse toggle */}
+        <button onClick={()=>setSBO(v=>!v)}
+          className="absolute -right-3 top-4 z-20 w-6 h-6 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-gray-400 hover:text-gray-700 text-[10px]">
+          {sidebarOpen?"◀":"▶"}
+        </button>
+        {!sidebarOpen && <div className="flex-1"/>}
+        {sidebarOpen && <><div className="px-3 py-3 border-b border-gray-200 bg-white space-y-2">
           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">My Stock Screens</div>
           <button onClick={()=>setEditing("new")}
             className="w-full py-1.5 rounded text-white text-xs font-semibold"
@@ -712,7 +733,7 @@ export default function ScreenerPage() {
               </div>
             );
           })}
-        </div>
+        </div></>}
       </div>
 
       {/* ── Main area ────────────────────────────────────────────────────── */}
@@ -852,61 +873,109 @@ export default function ScreenerPage() {
         {/* Results */}
         {!showEditor && !showFavorites && (
           <>
-            {/* Toolbar */}
-            <div className="px-3 py-1.5 border-b border-gray-200 bg-white text-xs flex items-center gap-2 flex-wrap">
-              {active ? (
-                <>
-                  <span className="font-bold" style={{color:"#003366"}}>{active.name}</span>
-                  <span className="text-gray-300">·</span>
-                  <span className="text-gray-400 font-mono text-[10px] truncate max-w-xs">{active.formula}</span>
-                  <span className="text-gray-300">·</span>
-                  <span className="text-gray-500">{active.exchange}</span>
-                  {active.interval && active.interval !== "1d" && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">
-                      {active.interval === "75min" ? "75m" : active.interval === "78min" ? "78m" : active.interval}
-                    </span>
-                  )}
-                  {asOfDate && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">HIST {asOfDate}</span>}
-                  {isLive && !asOfDate && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"/>
-                      LIVE
-                    </span>
-                  )}
-                  {loading && <span className="text-orange-500 animate-pulse">Screening… ⚡ first run ~2-3 min</span>}
-                  {!loading && <><span className="text-gray-300">·</span><span className="font-semibold" style={{color:"#003366"}}>{filtered.length} match{filtered.length!==1?"es":""}{filtered.length!==results.length?` (${results.length} total)`:""}</span></>}
-                </>
-              ) : (
-                <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
-              )}
-              {error && <span className="text-red-500">{error}</span>}
-              {warning && <span className="text-amber-600 text-[10px] max-w-lg leading-tight">{warning}</span>}
-              {!loading && results.length>0 && (
-                <div className="ml-auto flex items-center gap-2">
-                  <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={sectorFilter} onChange={e=>setSF(e.target.value)}>
-                    {sectors.map(s=><option key={s}>{s}</option>)}
-                  </select>
-                  <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
-                    {["All","Mega","Large","Mid","Small"].map(c=><option key={c}>{c}</option>)}
-                  </select>
-                  <div className="flex rounded overflow-hidden border border-gray-200">
-                    {(["overview","charts"] as const).map(v=>(
-                      <button key={v} onClick={()=>setView(v)} className="px-2 py-0.5 text-[11px] capitalize"
-                        style={{backgroundColor:view===v?"#003366":"white",color:view===v?"white":"#003399",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
-                        {v}
-                      </button>
-                    ))}
+            {/* ── Toolbar ─────────────────────────────────────────────── */}
+            <div className="border-b border-gray-200 bg-white text-xs">
+              {/* Row 1: scan info + view tabs */}
+              <div className="px-3 py-1.5 flex items-center gap-2 flex-wrap">
+                {active ? (
+                  <>
+                    <span className="font-bold" style={{color:"#003366"}}>{active.name}</span>
+                    <span className="text-gray-300">·</span>
+                    <span className="text-gray-500">{active.exchange}</span>
+                    {active.interval && active.interval !== "1d" && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700">
+                        {active.interval === "75min" ? "75m" : active.interval === "78min" ? "78m" : active.interval}
+                      </span>
+                    )}
+                    {asOfDate && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">HIST {asOfDate}</span>}
+                    {isLive && !asOfDate && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"/>LIVE
+                      </span>
+                    )}
+                    {!loading && results.length>0 && <><span className="text-gray-300">·</span><span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span></>}
+                  </>
+                ) : (
+                  <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
+                )}
+                {error && <span className="text-red-500">{error}</span>}
+                {warning && <span className="text-amber-600 text-[10px] max-w-lg leading-tight">{warning}</span>}
+
+                {/* View tabs — right side */}
+                {!loading && results.length>0 && (
+                  <div className="ml-auto flex items-center gap-3">
+                    {/* Search */}
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
+                      <input value={resultSearch} onChange={e=>setRS(e.target.value)}
+                        placeholder="Search symbol / name…"
+                        className="border border-gray-200 rounded pl-6 pr-2 py-0.5 text-[11px] bg-white w-44 focus:outline-none focus:border-blue-400"/>
+                    </div>
+                    {/* Sector + Cap filters */}
+                    <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={sectorFilter} onChange={e=>{setSF(e.target.value);setRS("");}}>
+                      {sectors.map(s=><option key={s}>{s}</option>)}
+                    </select>
+                    <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
+                      {["All","Mega","Large","Mid","Small"].map(c=><option key={c}>{c}</option>)}
+                    </select>
+                    {/* View toggle — tab style */}
+                    <div className="flex border border-gray-200 rounded overflow-hidden">
+                      {(["overview","charts"] as const).map(v=>(
+                        <button key={v} onClick={()=>setView(v)}
+                          className="px-3 py-1 text-[11px] font-medium capitalize transition-colors"
+                          style={{backgroundColor:view===v?"#003366":"white",color:view===v?"white":"#374151",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                          {v==="overview"?"📋 Table":"📈 Charts"}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Chart height — only in charts view */}
+                    {view==="charts" && (
+                      <div className="flex border border-gray-200 rounded overflow-hidden">
+                        {(["sm","md","lg"] as const).map((s,i)=>(
+                          <button key={s} onClick={()=>setChartSize(s)}
+                            className="px-2 py-1 text-[10px] font-medium transition-colors"
+                            style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#003366":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                            {s.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                )}
+              </div>
+
+              {/* Row 2: sector breakdown chips — only when results exist */}
+              {!loading && sectorCounts.length>0 && (
+                <div className="px-3 pb-1.5 flex gap-1.5 flex-wrap items-center">
+                  <span className="text-[10px] text-gray-400 mr-1">Sectors:</span>
+                  {sectorCounts.map(([sec,cnt])=>(
+                    <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
+                      className="px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
+                      style={{
+                        backgroundColor: sectorFilter===sec?"#003366":"#f1f5f9",
+                        color: sectorFilter===sec?"white":"#475569",
+                        borderColor: sectorFilter===sec?"#003366":"#e2e8f0",
+                      }}>
+                      {sec} <span className="opacity-70">{cnt}</span>
+                    </button>
+                  ))}
+                  {sectorFilter!=="All" && (
+                    <button onClick={()=>{setSF("All");goToPage(1);}} className="px-2 py-0.5 rounded-full text-[10px] border border-gray-300 text-gray-500 hover:bg-gray-100">✕ Clear</button>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* Loading */}
-            {loading && <div className="p-4">{[...Array(8)].map((_,i)=>(
-              <div key={i} className="flex gap-2 mb-2 animate-pulse">
-                <div className="h-8 bg-gray-100 rounded w-20"/><div className="h-8 bg-gray-100 rounded flex-1"/><div className="h-8 bg-gray-100 rounded w-32"/>
+            {/* Loading — progress bar */}
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-16 gap-4">
+                <div className="w-72 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full animate-[shimmer_1.5s_ease-in-out_infinite]"
+                    style={{width:"60%",animation:"pulse 1.5s ease-in-out infinite"}}/>
+                </div>
+                <div className="text-xs text-gray-500 animate-pulse">⚡ Screening {active?.exchange}… first run ~2-3 min, cached runs &lt;5s</div>
               </div>
-            ))}</div>}
+            )}
 
             {/* Empty */}
             {!loading && !active && (
@@ -933,6 +1002,7 @@ export default function ScreenerPage() {
                       <th className="border border-gray-200 px-2 py-1">Mkt Cap</th>
                       <TH label="Price" k="price"/>
                       <TH label="Chg %" k="change_pct"/>
+                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
                       <TH label="Volume" k="volume"/>
                       <TH label="RSI" k="rsi"/>
                       <th className="border border-gray-200 px-2 py-1">MACD</th>
@@ -940,7 +1010,6 @@ export default function ScreenerPage() {
                       <TH label="SMA50" k="sma50"/>
                       <TH label="SMA200" k="sma200"/>
                       <TH label="% 52H" k="pct_from_52w_high"/>
-                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
                       <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
                     </tr>
                   </thead>
@@ -961,12 +1030,16 @@ export default function ScreenerPage() {
                           {r.symbol}{r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
                         </td>
                         <td className="border border-gray-200 px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
-                        <td className="border border-gray-200 px-2 py-1"><span className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px]">{r.sector}</span></td>
-                        <td className="border border-gray-200 px-2 py-1 text-gray-500 text-[11px] whitespace-nowrap">{r.industry}</td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}} title={`Filter by ${r.sector}`}
+                            className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px] hover:bg-blue-100 cursor-pointer">{r.sector}</button>
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1 text-gray-500 text-[11px] whitespace-nowrap">{r.industry||"—"}</td>
                         <td className="border border-gray-200 px-2 py-1"><span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span></td>
                         <td className="border border-gray-200 px-2 py-1 text-gray-600 text-[11px] whitespace-nowrap">{fmtCap(r.market_cap,active?.exchange??"NSE")}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums">{r.price?.toLocaleString()}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
+                        <td className="border border-gray-200 px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")||"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums text-gray-600">{fmtVol(r.volume)}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
@@ -974,13 +1047,12 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma200!=null&&r.price>r.sma200?"#16a34a":"#dc2626"}}>{r.sma200??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
-                        <td className="border border-gray-200 px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")}</td>
                         <td className="border border-gray-200 px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
                       </tr>;
                     })}
                   </tbody>
                 </table>
-                <Pagination count={filtered.length} total={totalPages}/>
+                <Pagination count={displayResults.length} total={totalPages}/>
               </div>
             )}
 
@@ -1029,7 +1101,11 @@ export default function ScreenerPage() {
                           {/* Company + sector */}
                           <div className="flex-1 min-w-0">
                             <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
-                            <span className="text-[11px] text-gray-400">{r.sector} · {r.industry}</span>
+                            <span className="text-[11px] text-gray-400">
+                              <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}}
+                                className="hover:text-blue-600 hover:underline">{r.sector}</button>
+                              {r.industry ? ` · ${r.industry}` : ""}
+                            </span>
                           </div>
                           {/* Price + change */}
                           <div className="text-right shrink-0">
@@ -1049,12 +1125,12 @@ export default function ScreenerPage() {
                           </div>
                         </div>
                         {/* Full-width interactive chart */}
-                        <InteractiveChart data={r.ohlcv} masterBars={masterZoom} />
+                        <InteractiveChart data={r.ohlcv} masterBars={masterZoom} priceHeight={CHART_H[chartSize]}/>
                       </div>
                     );
                   })}
                 </div>
-                <Pagination count={filtered.length} total={totalPages}/>
+                <Pagination count={displayResults.length} total={totalPages}/>
               </div>
             )}
 

@@ -324,14 +324,81 @@ def _classify_cap(mcap_raw: float, is_indian: bool) -> tuple:
         return "Small", m
 
 # ── Dynamic info fetch ────────────────────────────────────────────────────
+# ── Name-based sector inference (fallback when yfinance returns nothing) ────
+_NAME_SECTOR: List[tuple] = [
+    # pattern (lowercase), sector, industry
+    ("bank",        "Financials",       "Banks"),
+    ("finance",     "Financials",       "Finance"),
+    ("financial",   "Financials",       "Finance"),
+    ("insurance",   "Financials",       "Insurance"),
+    ("capital",     "Financials",       "Finance"),
+    ("invest",      "Financials",       "Finance"),
+    ("nbfc",        "Financials",       "NBFC"),
+    ("pharma",      "Healthcare",       "Pharmaceuticals"),
+    ("health",      "Healthcare",       "Healthcare"),
+    ("hospital",    "Healthcare",       "Hospitals"),
+    ("medical",     "Healthcare",       "Healthcare"),
+    ("life science","Healthcare",       "Pharmaceuticals"),
+    ("techno",      "Technology",       "Technology"),
+    ("software",    "Technology",       "Software"),
+    ("infotech",    "Technology",       "IT Services"),
+    ("infosys",     "Technology",       "IT Services"),
+    ("digital",     "Technology",       "Technology"),
+    ("cyber",       "Technology",       "Technology"),
+    ("steel",       "Materials",        "Steel"),
+    ("cement",      "Materials",        "Cement"),
+    ("metals",      "Materials",        "Metals"),
+    ("copper",      "Materials",        "Metals"),
+    ("alumin",      "Materials",        "Metals"),
+    ("paint",       "Materials",        "Paints"),
+    ("chemical",    "Materials",        "Chemicals"),
+    ("power",       "Utilities",        "Power"),
+    ("electric",    "Utilities",        "Power"),
+    ("energy",      "Energy",           "Energy"),
+    ("gas",         "Energy",           "Oil & Gas"),
+    ("oil",         "Energy",           "Oil & Gas"),
+    ("petro",       "Energy",           "Oil & Gas"),
+    ("refin",       "Energy",           "Oil & Gas"),
+    ("auto",        "Consumer Disc.",   "Automobiles"),
+    ("motor",       "Consumer Disc.",   "Automobiles"),
+    ("tractor",     "Consumer Disc.",   "Automobiles"),
+    ("textile",     "Consumer Disc.",   "Textiles"),
+    ("retail",      "Consumer Disc.",   "Retail"),
+    ("hotel",       "Consumer Disc.",   "Hotels"),
+    ("resort",      "Consumer Disc.",   "Hotels"),
+    ("food",        "Consumer Staples", "Food"),
+    ("agro",        "Consumer Staples", "Agriculture"),
+    ("dairy",       "Consumer Staples", "Food"),
+    ("beverage",    "Consumer Staples", "Beverages"),
+    ("fmcg",        "Consumer Staples", "FMCG"),
+    ("infra",       "Industrials",      "Infrastructure"),
+    ("engineer",    "Industrials",      "Engineering"),
+    ("construct",   "Industrials",      "Construction"),
+    ("logistic",    "Industrials",      "Logistics"),
+    ("transport",   "Industrials",      "Transport"),
+    ("realty",      "Real Estate",      "Real Estate"),
+    ("property",    "Real Estate",      "Real Estate"),
+    ("telecom",     "Communication",    "Telecom"),
+    ("tele",        "Communication",    "Telecom"),
+    ("media",       "Communication",    "Media"),
+]
+
+def _infer_sector_from_name(name: str) -> tuple:
+    """Return (sector, industry) inferred from company name, or ('', '') if unknown."""
+    n = name.lower()
+    for pat, sec, ind in _NAME_SECTOR:
+        if pat in n:
+            return sec, ind
+    return "", ""
+
 def _fetch_info_dynamic(ticker: str) -> Dict:
     """Fetch sector/industry/cap from yfinance .info (full, not fast_info).
     Results are persisted to info_cache.json so this only runs once per ticker.
+    Falls back to name-based sector inference for NSE stocks.
     """
     global _INFO_CACHE
     try:
         t         = yf.Ticker(ticker)
-        # fast_info is quick but has no sector/industry — use full .info
         info_full: Dict = {}
         try:
             info_full = t.info or {}
@@ -342,8 +409,18 @@ def _fetch_info_dynamic(ticker: str) -> Dict:
         is_indian = ticker.endswith(".NS") or ticker.endswith(".BO")
         cap_size, market_cap = _classify_cap(mcap_raw, is_indian)
 
-        sector   = (info_full.get("sector")   or info_full.get("sectorDisp")   or "—").strip() or "—"
-        industry = (info_full.get("industry") or info_full.get("industryDisp") or "—").strip() or "—"
+        sector   = (info_full.get("sector")   or info_full.get("sectorDisp")   or "").strip()
+        industry = (info_full.get("industry") or info_full.get("industryDisp") or "").strip()
+
+        # Fallback: infer from company name when yfinance returns nothing
+        if not sector and is_indian:
+            name = _NSE_NAMES.get(ticker, ticker.replace(".NS","").replace(".BO",""))
+            inferred_sec, inferred_ind = _infer_sector_from_name(name)
+            sector   = inferred_sec or "—"
+            industry = inferred_ind or industry or "—"
+        else:
+            sector   = sector   or "—"
+            industry = industry or "—"
 
         result = {
             "sector":     sector,
@@ -359,12 +436,18 @@ def _fetch_info_dynamic(ticker: str) -> Dict:
     return result
 
 def _get_info(ticker: str) -> Dict:
-    """Static → disk cache → yfinance.  Name always comes from _NSE_NAMES."""
+    """Static → disk cache → yfinance + name inference.  Name from _NSE_NAMES."""
     base = _STATIC_INFO.get(ticker)
     if base is None:
         cached = _INFO_CACHE.get(ticker)
-        # Re-fetch if sector is "—" — means it was cached before we added .info lookup
-        if cached is None or cached.get("sector", "—") == "—":
+        is_indian = ticker.endswith(".NS") or ticker.endswith(".BO")
+        needs_refresh = (
+            cached is None or
+            cached.get("sector", "—") == "—" or
+            # Re-infer NSE stocks that have sector but no industry
+            (is_indian and cached.get("industry", "—") == "—")
+        )
+        if needs_refresh:
             base = _fetch_info_dynamic(ticker)
         else:
             base = cached
