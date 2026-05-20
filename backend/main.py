@@ -258,10 +258,14 @@ def get_presets():
 
 @app.post("/api/screener/run")
 def screener_run(body: ScreenerFilters):
+    import re as _re
     if body.formula and body.formula.strip():
-        filters = parse_formula(body.formula)
-        if not filters:
-            # Formula was provided but nothing was recognized — refuse to return all stocks
+        # Split on one or more blank lines — MIO uses blank lines as OR between blocks
+        blocks = [b.strip() for b in _re.split(r'\n\s*\n', body.formula.strip()) if b.strip()]
+        filter_blocks = [parse_formula(b) for b in blocks]
+        # Drop blocks where nothing was recognised
+        filter_blocks = [f for f in filter_blocks if f]
+        if not filter_blocks:
             return {
                 "count": 0, "results": [],
                 "warning": (
@@ -272,9 +276,22 @@ def screener_run(body: ScreenerFilters):
                     "Unsupported (auto-skipped): exch(), trend_dn, trend_up, !negation."
                 )
             }
+        if len(filter_blocks) == 1:
+            # Single block — fast path, no merging needed
+            results, is_live = run_screen(body.exchange, filter_blocks[0], as_of_date=body.as_of_date or None, interval=body.interval)
+        else:
+            # Multiple blocks (blank-line OR) — run each and union results
+            seen, results, is_live = set(), [], False
+            for fb in filter_blocks:
+                block_results, live = run_screen(body.exchange, fb, as_of_date=body.as_of_date or None, interval=body.interval)
+                is_live = is_live or live
+                for r in block_results:
+                    if r["ticker"] not in seen:
+                        seen.add(r["ticker"])
+                        results.append(r)
     else:
         filters = body.model_dump(exclude={"exchange", "formula"}, exclude_none=True)
-    results, is_live = run_screen(body.exchange, filters, as_of_date=body.as_of_date or None, interval=body.interval)
+        results, is_live = run_screen(body.exchange, filters, as_of_date=body.as_of_date or None, interval=body.interval)
     return {"count": len(results), "results": results, "live": is_live}
 
 @app.post("/api/screener/parse")
