@@ -1209,7 +1209,7 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     return data
 
 # ── Indicator Computation ──────────────────────────────────────────────────
-def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, intraday: bool = False) -> Optional[Dict[str, Any]]:
+def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, intraday: bool = False, include_ohlcv: bool = True) -> Optional[Dict[str, Any]]:
     """Returns OHLCV-based indicators. Info (name/sector/cap) added later.
 
     Expects a clean DataFrame from _normalize_df (flat columns, NaN rows
@@ -1378,39 +1378,42 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         new_52w_high = bool(pct_h52 is not None and pct_h52 >= -0.5)
 
         # ── OHLCV — last N bars with per-bar SMA20/50 for interactive chart ──
-        chart_bars = 300 if intraday else 252  # 60d×5bars for 75min, 1y for daily
-        date_fmt   = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
-        sma20_rolling = close.rolling(20).mean()
-        sma50_rolling = close.rolling(50).mean()
-        df_tail = df.tail(chart_bars)
-        ohlcv: list = []
-        for ts, row in df_tail.iterrows():
-            try:
-                o  = float(row["Open"])
-                h  = float(row["High"])
-                lo = float(row["Low"])
-                c  = float(row["Close"])
-                if any(np.isnan(x) for x in [o, h, lo, c]):
+        if include_ohlcv:
+            chart_bars = 300 if intraday else 252  # 60d×5bars for 75min, 1y for daily
+            date_fmt   = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
+            sma20_rolling = close.rolling(20).mean()
+            sma50_rolling = close.rolling(50).mean()
+            df_tail = df.tail(chart_bars)
+            ohlcv: list = []
+            for ts, row in df_tail.iterrows():
+                try:
+                    o  = float(row["Open"])
+                    h  = float(row["High"])
+                    lo = float(row["Low"])
+                    c  = float(row["Close"])
+                    if any(np.isnan(x) for x in [o, h, lo, c]):
+                        continue
+                    v_raw = row.get("Volume", 0)
+                    v = int(float(v_raw)) if v_raw is not None and not np.isnan(float(v_raw)) else 0
+                    s20_raw = sma20_rolling.get(ts)
+                    s50_raw = sma50_rolling.get(ts)
+                    ohlcv.append({
+                        "date":   ts.strftime(date_fmt),
+                        "open":   round(o,  2),
+                        "high":   round(h,  2),
+                        "low":    round(lo, 2),
+                        "close":  round(c,  2),
+                        "volume": v,
+                        "sma20":  round(float(s20_raw), 2) if s20_raw is not None and not np.isnan(float(s20_raw)) else None,
+                        "sma50":  round(float(s50_raw), 2) if s50_raw is not None and not np.isnan(float(s50_raw)) else None,
+                    })
+                except Exception:
                     continue
-                v_raw = row.get("Volume", 0)
-                v = int(float(v_raw)) if v_raw is not None and not np.isnan(float(v_raw)) else 0
-                s20_raw = sma20_rolling.get(ts)
-                s50_raw = sma50_rolling.get(ts)
-                ohlcv.append({
-                    "date":   ts.strftime(date_fmt),
-                    "open":   round(o,  2),
-                    "high":   round(h,  2),
-                    "low":    round(lo, 2),
-                    "close":  round(c,  2),
-                    "volume": v,
-                    "sma20":  round(float(s20_raw), 2) if s20_raw is not None and not np.isnan(float(s20_raw)) else None,
-                    "sma50":  round(float(s50_raw), 2) if s50_raw is not None and not np.isnan(float(s50_raw)) else None,
-                })
-            except Exception:
-                continue
-
-        sparkline = [round(float(x), 2) for x in close.tail(60).tolist()
-                     if _safe(x) is not None]
+            sparkline = [round(float(x), 2) for x in close.tail(60).tolist()
+                         if _safe(x) is not None]
+        else:
+            ohlcv = []
+            sparkline = []
 
         display = ticker.replace(".NS", "").replace(".BO", "")
         return {
@@ -1857,13 +1860,25 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             bar_min = _intraday_bar_minutes(exchange)
         ohlcv_data = _download_intraday_ohlcv(exchange, tickers, bar_min)
         _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": bar_min})
+        matched_tickers_intra: List[str] = []
+        for i, ticker in enumerate(tickers):
+            df = ohlcv_data.get(ticker)
+            if df is None:
+                _SCREEN_PROGRESS["done"] = i + 1
+                continue
+            # Skip OHLCV during filter pass
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=False)
+            _SCREEN_PROGRESS["done"] = i + 1
+            if ind and apply_filters(ind, filters):
+                matched_tickers_intra.append(ticker)
+        # Rebuild with full OHLCV only for matched tickers
         matched: List[Dict] = []
-        for ticker in tickers:
+        for ticker in matched_tickers_intra:
             df = ohlcv_data.get(ticker)
             if df is None:
                 continue
-            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True)
-            if ind and apply_filters(ind, filters):
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=True)
+            if ind:
                 matched.append(ind)
         matched = [_enrich(r) for r in matched]
         matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
@@ -1885,6 +1900,9 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
 
     # Stage 3: Compute indicators + filter — parallel across all tickers
     _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": 0})
+    _done_f = [0]
+    _lock_f = __import__("threading").Lock()
+
     def _process(ticker: str):
         try:
             df = ohlcv_data.get(ticker)
@@ -1892,19 +1910,39 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
                 return None
             if live_bars.get(ticker):
                 df = _patch_live_bar(df, live_bars[ticker])
-            ind = compute_indicators(ticker, df, as_of_date=as_of_date)
+            # Skip heavy OHLCV build during filter scan — add it only for matches
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, include_ohlcv=False)
             if ind and apply_filters(ind, filters):
-                return ind
+                return ticker  # return ticker so we can enrich with OHLCV after
             return None
         except Exception as e:
             print(f"[screener] _process({ticker}): {type(e).__name__}: {e}")
             return None
+        finally:
+            with _lock_f:
+                _done_f[0] += 1
+                _SCREEN_PROGRESS["done"] = _done_f[0]
 
-    matched = []
+    matched_tickers = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
-        for ind in pool.map(_process, tickers):
-            if ind is not None:
+        for result in pool.map(_process, tickers):
+            if result is not None:
+                matched_tickers.append(result)
+
+    # Build full OHLCV only for matched tickers (typically ~20-100 vs 2109)
+    matched = []
+    for ticker in matched_tickers:
+        try:
+            df = ohlcv_data.get(ticker)
+            if df is None:
+                continue
+            if live_bars.get(ticker):
+                df = _patch_live_bar(df, live_bars[ticker])
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, include_ohlcv=True)
+            if ind:
                 matched.append(ind)
+        except Exception as e:
+            print(f"[screener] ohlcv_enrich({ticker}): {type(e).__name__}: {e}")
 
     # Stage 4: Enrich matched stocks with name/sector/cap
     matched = [_enrich(r) for r in matched]
