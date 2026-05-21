@@ -461,6 +461,7 @@ export default function ScreenerPage() {
   const [showFavorites, setShowFavorites] = useState(false);
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
@@ -543,6 +544,7 @@ export default function ScreenerPage() {
       const data = await res.json();
       setResults(data.results ?? []);
       setIsLive(data.live ?? false);
+      setLastRefreshed(new Date());
       if (data.warning) setWarning(data.warning);
     } catch(e) {
       setError(`Backend error: ${e}`);
@@ -626,7 +628,10 @@ export default function ScreenerPage() {
     return <th onClick={()=>handleSort(k)}
       className="border border-gray-200 px-2 py-1 cursor-pointer select-none whitespace-nowrap hover:bg-blue-50 text-left"
       style={{backgroundColor:on?"#e8f0fe":undefined}}>
-      {label}{on?(sortDir==="asc"?" ▲":" ▼"):""}
+      {label}
+      <span className="ml-0.5" style={{color:on?"#003366":"#ccc",fontSize:"9px"}}>
+        {on?(sortDir==="asc"?"▲":"▼"):"↕"}
+      </span>
     </th>;
   }
 
@@ -699,10 +704,10 @@ export default function ScreenerPage() {
               />
               {asOfDate && (
                 <button
-                  onClick={() => setAsOfDate("")}
-                  className="px-1.5 rounded border border-gray-300 text-gray-400 hover:text-gray-700 text-[11px]"
-                  title="Clear — run today">
-                  ✕
+                  onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
+                  className="px-1.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap"
+                  title="Switch to live/today data">
+                  Today
                 </button>
               )}
             </div>
@@ -894,7 +899,7 @@ export default function ScreenerPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"/>LIVE
                       </span>
                     )}
-                    {!loading && results.length>0 && <><span className="text-gray-300">·</span><span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span></>}
+                    {!loading && results.length>0 && <><span className="text-gray-300">·</span><span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>{lastRefreshed&&<><span className="text-gray-300">·</span><span className="text-gray-400 text-[10px]">as of {lastRefreshed.toTimeString().slice(0,5)}</span></>}</>}
                   </>
                 ) : (
                   <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
@@ -961,34 +966,76 @@ export default function ScreenerPage() {
 
               {/* Row 2: sector breakdown chips — only when results exist */}
               {!loading && sectorCounts.length>0 && (
-                <div className="px-3 pb-1.5 flex gap-1.5 flex-wrap items-center">
-                  <span className="text-[10px] text-gray-400 mr-1">Sectors:</span>
-                  {sectorCounts.map(([sec,cnt])=>(
-                    <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
-                      className="px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
-                      style={{
-                        backgroundColor: sectorFilter===sec?"#003366":"#f1f5f9",
-                        color: sectorFilter===sec?"white":"#475569",
-                        borderColor: sectorFilter===sec?"#003366":"#e2e8f0",
-                      }}>
-                      {sec} <span className="opacity-70">{cnt}</span>
-                    </button>
-                  ))}
-                  {sectorFilter!=="All" && (
-                    <button onClick={()=>{setSF("All");goToPage(1);}} className="px-2 py-0.5 rounded-full text-[10px] border border-gray-300 text-gray-500 hover:bg-gray-100">✕ Clear</button>
-                  )}
+                <div className="px-3 pb-1.5 flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400 shrink-0">Sectors:</span>
+                  <div className="relative flex-1 min-w-0">
+                    <div className="flex gap-1.5 items-center overflow-x-auto" style={{scrollbarWidth:"none",msOverflowStyle:"none"}}>
+                      {sectorCounts.map(([sec,cnt])=>(
+                        <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
+                          className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
+                          style={{
+                            backgroundColor: sectorFilter===sec?"#003366":"#f1f5f9",
+                            color: sectorFilter===sec?"white":"#475569",
+                            borderColor: sectorFilter===sec?"#003366":"#e2e8f0",
+                          }}>
+                          {sec} <span className="opacity-70">{cnt}</span>
+                        </button>
+                      ))}
+                      {sectorFilter!=="All" && (
+                        <button onClick={()=>{setSF("All");goToPage(1);}} className="shrink-0 px-2 py-0.5 rounded-full text-[10px] border border-gray-300 text-gray-500 hover:bg-gray-100">✕ Clear</button>
+                      )}
+                    </div>
+                    <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"/>
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Loading — progress bar */}
+            {/* Loading — skeleton table */}
             {loading && (
-              <div className="flex flex-col items-center justify-center py-16 gap-4">
-                <div className="w-72 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full animate-[shimmer_1.5s_ease-in-out_infinite]"
-                    style={{width:"60%",animation:"pulse 1.5s ease-in-out infinite"}}/>
+              <div className="flex-1 overflow-hidden">
+                <div className="h-0.5 bg-blue-100 overflow-hidden">
+                  <div className="h-full bg-blue-400 animate-pulse" style={{width:"45%"}}/>
                 </div>
-                <div className="text-xs text-gray-500 animate-pulse">⚡ Screening {active?.exchange}… first run ~2-3 min, cached runs &lt;5s</div>
+                <div className="px-3 py-2 text-[11px] text-gray-400 animate-pulse">
+                  ⚡ Screening {active?.exchange}… first run ~2-3 min, cached &lt;5s
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="text-xs border-collapse w-full">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        {["★","#","Symbol","Company","Sector","Industry","Cap","Mkt Cap","Price","Chg %","Earnings","Volume","RSI","MACD","SMA20","SMA50","SMA200","% 52H","Chart"].map(h=>(
+                          <th key={h} className="border border-gray-200 px-2 py-1 text-left text-gray-300 whitespace-nowrap font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({length:12},(_,i)=>(
+                        <tr key={i} className="border-b border-gray-100" style={{opacity:1-i*0.055}}>
+                          <td className="border border-gray-200 px-1 py-1 w-6"><div className="h-3 w-3 bg-gray-100 rounded animate-pulse mx-auto"/></td>
+                          <td className="border border-gray-200 px-2 py-1 w-7"><div className="h-2.5 w-4 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-16 bg-gray-200 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-28 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-4 w-14 bg-blue-50 rounded-full animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-20 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-4 w-8 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-green-50 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-7 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
+                          <td className="border border-gray-200 px-0 py-0"><div className="h-8 w-20 bg-gray-50 animate-pulse"/></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -1010,17 +1057,17 @@ export default function ScreenerPage() {
                       <th className="border border-gray-200 px-1 py-1 w-6 text-center text-gray-400">★</th>
                       <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
                       <TH label="Symbol" k="symbol"/>
-                      <th className="border border-gray-200 px-2 py-1">Company</th>
+                      <TH label="Company" k="name"/>
                       <th className="border border-gray-200 px-2 py-1">Sector</th>
-                      <th className="border border-gray-200 px-2 py-1">Industry</th>
-                      <th className="border border-gray-200 px-2 py-1">Cap</th>
-                      <th className="border border-gray-200 px-2 py-1">Mkt Cap</th>
+                      <TH label="Industry" k="industry"/>
+                      <TH label="Cap" k="cap_size"/>
+                      <TH label="Mkt Cap" k="market_cap"/>
                       <TH label="Price" k="price"/>
                       <TH label="Chg %" k="change_pct"/>
                       <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
                       <TH label="Volume" k="volume"/>
                       <TH label="RSI" k="rsi"/>
-                      <th className="border border-gray-200 px-2 py-1">MACD</th>
+                      <TH label="MACD" k="macd_bullish"/>
                       <TH label="SMA20" k="sma20"/>
                       <TH label="SMA50" k="sma50"/>
                       <TH label="SMA200" k="sma200"/>
