@@ -965,9 +965,9 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
         return None
 
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
-DOWNLOAD_BATCH          = 500   # tickers per yf.download() call (daily)
+DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
 DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
-DOWNLOAD_WORKERS        = 4     # concurrent batch downloads (balanced: speed vs yf rate-limit)
+DOWNLOAD_WORKERS        = 3     # concurrent batch downloads (proven safe vs yf rate-limit)
 
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
