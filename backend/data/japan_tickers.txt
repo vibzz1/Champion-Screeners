@@ -1,0 +1,136 @@
+# TSE (Tokyo Stock Exchange) — Nikkei 225 + TSE Prime liquid stocks
+# yfinance suffix .T is added automatically
+# Technology / Electronics
+6758
+6861
+8035
+6857
+6954
+7974
+6902
+6981
+6723
+6724
+6770
+6645
+6752
+6594
+6479
+6478
+6471
+6506
+6701
+6702
+6674
+6963
+6952
+6857
+# Semiconductors / Components
+6501
+8015
+6273
+6302
+6326
+6361
+3436
+# Automotive
+7203
+7267
+7201
+7269
+7270
+7205
+7272
+7011
+7013
+# Finance / Banking
+8306
+8411
+8316
+8604
+8591
+8309
+8354
+8377
+8725
+8766
+8697
+# Pharma / Healthcare
+4568
+4503
+4519
+4523
+4578
+4581
+4543
+4151
+4452
+# Chemicals / Materials
+4063
+4021
+3407
+3402
+4004
+4005
+4188
+4204
+4208
+5401
+3863
+3861
+# Telecoms
+9432
+9433
+9984
+9613
+# Retail / Consumer
+3099
+8028
+8267
+8001
+8002
+8012
+8053
+8058
+# Industrial / Machinery
+6367
+6301
+7751
+7831
+7832
+# Construction / Real Estate
+1925
+1801
+1802
+1803
+1808
+1811
+1812
+8802
+8830
+8983
+# Transport / Logistics
+9064
+9101
+9104
+9107
+9021
+9022
+9020
+9008
+9009
+9202
+# Energy / Utilities
+9501
+9502
+9503
+9531
+# Entertainment / Services
+4661
+9735
+9766
+7954
+7912
+7913
+2914
+6098

@@ -1,0 +1,50 @@
+# KOSPI — major South Korean stocks
+# yfinance suffix .KS is added automatically
+# Tech / Semiconductors
+005930
+000660
+009150
+006400
+034730
+# Internet / Platform
+035420
+035720
+293490
+036570
+259960
+# Auto
+005380
+000270
+012330
+010140
+# Chemicals / Battery / EV
+051910
+003670
+247540
+086520
+096770
+# Finance
+055550
+086790
+032830
+105560
+139130
+# Telecom
+017670
+030200
+# Steel / Heavy Industry
+005490
+010950
+011200
+012450
+003490
+# Pharma / Bio
+068270
+000100
+# Retail / Consumer
+139480
+028260
+# Conglomerate
+003550
+034220
+008770

@@ -471,24 +471,30 @@ def _load_tickers(filename: str, suffix: str) -> List[str]:
                 tickers.append(t)
     return tickers
 
-_NSE_TICKERS = _load_tickers("nse_tickers.txt", ".NS")
-_BSE_TICKERS = _load_tickers("bse_tickers.txt", ".BO")
-_SP500_TICKERS = _load_tickers("sp500_tickers.txt", "")   # no suffix — US tickers as-is
+_NSE_TICKERS    = _load_tickers("nse_tickers.txt",     ".NS")
+_BSE_TICKERS    = _load_tickers("bse_tickers.txt",     ".BO")
+_SP500_TICKERS  = _load_tickers("sp500_tickers.txt",   "")    # no suffix — US tickers as-is
+_JAPAN_TICKERS  = _load_tickers("japan_tickers.txt",   ".T")  # Tokyo Stock Exchange
+_KOREA_TICKERS  = _load_tickers("korea_tickers.txt",   ".KS") # KOSPI
+_GERMANY_TICKERS= _load_tickers("germany_tickers.txt", ".DE") # XETRA Frankfurt
 
 UNIVERSES = {
-    "NSE":    _NSE_TICKERS,
-    "BSE":    _BSE_TICKERS,
-    "SP500":  _SP500_TICKERS,
-    "NASDAQ": ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","COST","NFLX",
-               "AMD","ADBE","QCOM","INTC","CSCO","ORCL","PANW","CRWD","PLTR","SHOP",
-               "ARM","DASH","NET","DDOG","SNOW","ZS","FTNT","SMCI","MSTR","COIN",
-               "ABNB","UBER","LYFT","RIVN","SOFI","HOOD","RBLX","PYPL","SQ","MARVL",
-               "SNPS","CDNS","ASML","TXN","MCHP","AMAT","MU","LRCX","KLAC","INTU"],
-    "NYSE":   ["JPM","V","MA","UNH","JNJ","WMT","PG","HD","BAC","XOM",
-               "CVX","KO","PEP","MRK","LLY","ABT","TMO","DHR","MCD","NKE",
-               "DIS","CRM","ACN","IBM","GS","MS","WFC","C","USB","AXP",
-               "CAT","DE","HON","MMM","GE","BA","RTX","LMT","NOC","GD",
-               "T","VZ","CMCSA","NEE","DUK","SO","D","AEP","EXC","PCG"],
+    "NSE":     _NSE_TICKERS,
+    "BSE":     _BSE_TICKERS,
+    "SP500":   _SP500_TICKERS,
+    "NASDAQ":  ["AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AVGO","COST","NFLX",
+                "AMD","ADBE","QCOM","INTC","CSCO","ORCL","PANW","CRWD","PLTR","SHOP",
+                "ARM","DASH","NET","DDOG","SNOW","ZS","FTNT","SMCI","MSTR","COIN",
+                "ABNB","UBER","LYFT","RIVN","SOFI","HOOD","RBLX","PYPL","SQ","MARVL",
+                "SNPS","CDNS","ASML","TXN","MCHP","AMAT","MU","LRCX","KLAC","INTU"],
+    "NYSE":    ["JPM","V","MA","UNH","JNJ","WMT","PG","HD","BAC","XOM",
+                "CVX","KO","PEP","MRK","LLY","ABT","TMO","DHR","MCD","NKE",
+                "DIS","CRM","ACN","IBM","GS","MS","WFC","C","USB","AXP",
+                "CAT","DE","HON","MMM","GE","BA","RTX","LMT","NOC","GD",
+                "T","VZ","CMCSA","NEE","DUK","SO","D","AEP","EXC","PCG"],
+    "TSE":     _JAPAN_TICKERS,   # Tokyo Stock Exchange
+    "KOSPI":   _KOREA_TICKERS,   # Korea Stock Exchange
+    "XETRA":   _GERMANY_TICKERS, # Frankfurt / Xetra
 }
 
 # ── Preset Screens ─────────────────────────────────────────────────────────
@@ -1711,6 +1717,23 @@ def _is_market_open(exchange: str) -> bool:
         tz   = pytz.timezone("America/New_York")
         now  = now_utc.astimezone(tz)
         open_, close_ = datetime.time(9, 30), datetime.time(16, 0)
+    elif exchange == "TSE":
+        tz   = pytz.timezone("Asia/Tokyo")
+        now  = now_utc.astimezone(tz)
+        # TSE: 09:00–11:30 morning, 12:30–15:30 afternoon (lunch break skipped)
+        t    = now.time()
+        return now.weekday() < 5 and (
+            datetime.time(9, 0) <= t <= datetime.time(11, 30) or
+            datetime.time(12, 30) <= t <= datetime.time(15, 30)
+        )
+    elif exchange == "KOSPI":
+        tz   = pytz.timezone("Asia/Seoul")
+        now  = now_utc.astimezone(tz)
+        open_, close_ = datetime.time(9, 0), datetime.time(15, 30)
+    elif exchange == "XETRA":
+        tz   = pytz.timezone("Europe/Berlin")
+        now  = now_utc.astimezone(tz)
+        open_, close_ = datetime.time(9, 0), datetime.time(17, 30)
     else:
         return False
     return now.weekday() < 5 and open_ <= now.time() <= close_
