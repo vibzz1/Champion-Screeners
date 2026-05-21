@@ -34,12 +34,12 @@ _NOT_SMA_TREND_RE = _re_module.compile(r'not_sma(\d+)_trend_dn_\d+')
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
 DATA_DIR        = BASE_DIR / "data"
-CACHE_DIR       = BASE_DIR / "cache"
+CACHE_DIR       = Path(os.environ.get("CACHE_DIR", str(BASE_DIR / "cache")))
 OHLCV_CACHE_DIR = CACHE_DIR / "ohlcv"
 INFO_CACHE_FILE = CACHE_DIR / "info_cache.json"
 
-CACHE_DIR.mkdir(exist_ok=True)
-OHLCV_CACHE_DIR.mkdir(exist_ok=True)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+OHLCV_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Load company names from NSE equity CSV ────────────────────────────────
 def _load_nse_names() -> Dict[str, str]:
