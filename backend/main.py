@@ -10,7 +10,7 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -62,6 +62,10 @@ async def startup_event():
         print("[prewarm] Scheduler started — daily@08:00IST, intraday@09:45IST (Mon–Fri)")
     except Exception as e:
         print(f"[prewarm] Scheduler setup failed: {e}")
+
+@app.get("/api/screener/progress")
+def screener_progress():
+    return dict(_SCREEN_PROGRESS)
 
 app.add_middleware(
     CORSMiddleware,

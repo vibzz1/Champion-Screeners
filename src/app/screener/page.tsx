@@ -438,6 +438,77 @@ function FormulaEditor({
   );
 }
 
+// ── Scan progress panel ────────────────────────────────────────────────────
+function ScanProgress({ progress, startMs, exchange }: {
+  progress: {phase:string;done:number;total:number;exchange:string;bar_min:number} | null;
+  startMs: number;
+  exchange: string;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startMs) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [startMs]);
+
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const elapsedStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  const pct   = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  const phase = progress?.phase ?? "connecting";
+  const isCache = phase === "cache";
+
+  const phaseLabel =
+    isCache       ? "Loaded from cache" :
+    phase === "downloading" ? `Downloading ${progress?.exchange || exchange} · batch ${progress?.done ?? 0} / ${progress?.total ?? "…"}` :
+    phase === "filtering"   ? `Filtering ${progress?.exchange || exchange} stocks…` :
+    phase === "idle"        ? "Finalising…" :
+                              `Connecting to ${exchange} server…`;
+
+  const hint = isCache
+    ? "Cache hit — results arriving shortly"
+    : elapsed < 15
+    ? "First run downloads all tickers (~2–5 min). Subsequent runs use cache (<5 s)."
+    : elapsed < 90
+    ? "Still downloading — hang tight…"
+    : "Large universe. You can run a smaller scan while waiting.";
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
+      {/* Animated icon */}
+      <div className="text-4xl animate-pulse">📡</div>
+
+      {/* Phase label */}
+      <div className="text-sm font-semibold text-gray-700 text-center">{phaseLabel}</div>
+
+      {/* Progress bar */}
+      <div className="w-full max-w-sm">
+        <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+          <span>{isCache ? "100%" : `${pct}%`}</span>
+          <span className="tabular-nums">⏱ {elapsedStr}</span>
+        </div>
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-700"
+            style={{
+              width: isCache ? "100%" : phase === "connecting" ? "4%" : `${Math.max(4, pct)}%`,
+              background: isCache ? "#16a34a" : "linear-gradient(90deg,#3b82f6,#6366f1)",
+            }}
+          />
+        </div>
+        {!isCache && progress && progress.total > 0 && (
+          <div className="text-[10px] text-gray-400 mt-1 text-center tabular-nums">
+            {progress.done} / {progress.total} {phase === "filtering" ? "stocks filtered" : "batches downloaded"}
+          </div>
+        )}
+      </div>
+
+      {/* Hint */}
+      <div className="text-[11px] text-gray-400 text-center max-w-xs leading-relaxed">{hint}</div>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function ScreenerPage() {
   const [screeners, setScreeners]   = useState<SavedScreener[]>([]);
@@ -463,6 +534,8 @@ export default function ScreenerPage() {
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [jumpToTicker, setJumpToTicker]   = useState<string | null>(null);
+  const [scanProgress, setScanProgress]   = useState<{phase:string;done:number;total:number;exchange:string;bar_min:number}|null>(null);
+  const scanStartRef = useRef<number>(0);
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
@@ -528,6 +601,8 @@ export default function ScreenerPage() {
     setEditing(null);
     setShowFavorites(false);
     setLoading(true);
+    scanStartRef.current = Date.now();
+    setScanProgress(null);
     setError("");
     setWarning("");
     setResults([]);
@@ -606,6 +681,18 @@ export default function ScreenerPage() {
       if (resultsRef.current) resultsRef.current.scrollTop = 0;
     }));
   }
+
+  // Poll backend progress while a scan is loading
+  useEffect(() => {
+    if (!loading) { setScanProgress(null); return; }
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/api/screener/progress`);
+        if (r.ok) setScanProgress(await r.json());
+      } catch {}
+    }, 1200);
+    return () => clearInterval(id);
+  }, [loading]);
 
   // Jump to a specific chart card when navigating from table → charts view
   useEffect(() => {
@@ -1002,53 +1089,8 @@ export default function ScreenerPage() {
               )}
             </div>
 
-            {/* Loading — skeleton table */}
-            {loading && (
-              <div className="flex-1 overflow-hidden">
-                <div className="h-0.5 bg-blue-100 overflow-hidden">
-                  <div className="h-full bg-blue-400 animate-pulse" style={{width:"45%"}}/>
-                </div>
-                <div className="px-3 py-2 text-[11px] text-gray-400 animate-pulse">
-                  ⚡ Screening {active?.exchange}… first run ~2-3 min, cached &lt;5s
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="text-xs border-collapse w-full">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        {["★","#","Symbol","Company","Sector","Industry","Cap","Mkt Cap","Price","Chg %","Earnings","Volume","RSI","MACD","SMA20","SMA50","SMA200","% 52H","Chart"].map(h=>(
-                          <th key={h} className="border border-gray-200 px-2 py-1 text-left text-gray-300 whitespace-nowrap font-medium">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {Array.from({length:12},(_,i)=>(
-                        <tr key={i} className="border-b border-gray-100" style={{opacity:1-i*0.055}}>
-                          <td className="border border-gray-200 px-1 py-1 w-6"><div className="h-3 w-3 bg-gray-100 rounded animate-pulse mx-auto"/></td>
-                          <td className="border border-gray-200 px-2 py-1 w-7"><div className="h-2.5 w-4 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-16 bg-gray-200 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-28 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-4 w-14 bg-blue-50 rounded-full animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-20 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-4 w-8 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-green-50 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-7 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-12 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-2 py-1"><div className="h-2.5 w-10 bg-gray-100 rounded animate-pulse"/></td>
-                          <td className="border border-gray-200 px-0 py-0"><div className="h-8 w-20 bg-gray-50 animate-pulse"/></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            {/* Loading — real progress */}
+            {loading && <ScanProgress progress={scanProgress} startMs={scanStartRef.current} exchange={active?.exchange??""} />}
 
             {/* Empty */}
             {!loading && !active && (

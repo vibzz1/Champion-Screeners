@@ -969,6 +969,15 @@ DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
 DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
 DOWNLOAD_WORKERS        = 3     # concurrent batch downloads
 
+# ── Global scan progress — polled by GET /api/screener/progress ───────────────
+_SCREEN_PROGRESS: dict = {
+    "phase":    "idle",   # idle | cache | downloading | filtering
+    "done":     0,
+    "total":    0,
+    "exchange": "",
+    "bar_min":  0,        # 0 for daily, 75/78 for intraday
+}
+
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
 
@@ -1042,6 +1051,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     cached = _load_intraday_cache(exchange, bar_min)
     if cached is not None:
         print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache")
+        _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": bar_min})
         return cached
 
     data: Dict[str, pd.DataFrame] = {}
@@ -1069,6 +1079,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
         n_batches = (len(yf_tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
         print(f"[screener] {exchange} {bar_min}min (yfinance): downloading {len(yf_tickers)} tickers "
               f"in {n_batches} batches (15m→{bar_min}m)…")
+        _SCREEN_PROGRESS.update({"phase": "downloading", "done": 0, "total": n_batches, "exchange": exchange, "bar_min": bar_min})
         for i in range(0, len(yf_tickers), DOWNLOAD_BATCH_INTRADAY):
             batch = yf_tickers[i : i + DOWNLOAD_BATCH_INTRADAY]
             b_num = i // DOWNLOAD_BATCH_INTRADAY + 1
@@ -1079,6 +1090,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                 )
                 if raw is None or raw.empty:
                     print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: empty")
+                    _SCREEN_PROGRESS["done"] = b_num
                     continue
                 ok = 0
                 for ticker in batch:
@@ -1090,8 +1102,10 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                         data[ticker] = df_bar
                         ok += 1
                 print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
+                _SCREEN_PROGRESS["done"] = b_num
             except Exception as e:
                 print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
+                _SCREEN_PROGRESS["done"] = b_num
 
     print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
     if len(data) >= max(10, len(tickers) * 0.1):   # save if ≥10% covered
@@ -1128,6 +1142,7 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     cached = _load_ohlcv_cache(exchange)
     if cached is not None:
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
+        _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": 0})
         return cached
 
     data: Dict[str, pd.DataFrame] = {}
@@ -1153,6 +1168,8 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
         n_batches = len(batches)
         print(f"[screener] {exchange} (yfinance): downloading {len(yf_tickers)} tickers in "
               f"{n_batches} batches × {DOWNLOAD_WORKERS} parallel workers…")
+        _SCREEN_PROGRESS.update({"phase": "downloading", "done": 0, "total": n_batches, "exchange": exchange, "bar_min": 0})
+        _done_count = [0]   # mutable counter for closure
 
         def _fetch_batch(args):
             b_num, batch = args
@@ -1171,9 +1188,13 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                         if df is not None:
                             result[ticker] = df
                     print(f"[screener] batch {b_num}/{n_batches}: {len(result)}/{len(batch)} OK")
+                    _done_count[0] += 1
+                    _SCREEN_PROGRESS["done"] = _done_count[0]
                     return result
                 except Exception as e:
                     print(f"[screener] batch {b_num}/{n_batches} attempt {attempt} failed: {type(e).__name__}: {e}")
+            _done_count[0] += 1
+            _SCREEN_PROGRESS["done"] = _done_count[0]
             return {}  # both attempts failed
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
@@ -1835,6 +1856,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
         else:
             bar_min = _intraday_bar_minutes(exchange)
         ohlcv_data = _download_intraday_ohlcv(exchange, tickers, bar_min)
+        _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": bar_min})
         matched: List[Dict] = []
         for ticker in tickers:
             df = ohlcv_data.get(ticker)
@@ -1845,6 +1867,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
                 matched.append(ind)
         matched = [_enrich(r) for r in matched]
         matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
+        _SCREEN_PROGRESS["phase"] = "idle"
         return matched, False
 
     # ── Daily path (default) ──────────────────────────────────────────────
@@ -1861,6 +1884,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             live_bars = _fetch_live_us_bars(tickers)
 
     # Stage 3: Compute indicators + filter — parallel across all tickers
+    _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": 0})
     def _process(ticker: str):
         try:
             df = ohlcv_data.get(ticker)
@@ -1885,6 +1909,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     # Stage 4: Enrich matched stocks with name/sector/cap
     matched = [_enrich(r) for r in matched]
     matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
+    _SCREEN_PROGRESS["phase"] = "idle"
     return matched, bool(live_bars)
 
 
