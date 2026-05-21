@@ -992,13 +992,21 @@ def _ohlcv_intraday_cache_path(exchange: str, bar_min: int) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{datetime.date.today().isoformat()}.pkl"
 
 def _load_intraday_cache(exchange: str, bar_min: int) -> Optional[Dict[str, pd.DataFrame]]:
-    p = _ohlcv_intraday_cache_path(exchange, bar_min)
-    if p.exists():
-        try:
-            with open(p, "rb") as f:
-                return pickle.load(f)
-        except Exception:
-            pass
+    """Load today's intraday cache, or fall back up to 3 days old.
+    Intraday data is only valid same-day, so keep the lookback short.
+    """
+    today = datetime.date.today()
+    for days_back in range(4):  # today → 3 days back
+        d = today - datetime.timedelta(days=days_back)
+        p = OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{d.isoformat()}.pkl"
+        if p.exists():
+            try:
+                data = pickle.load(open(p, "rb"))
+                if days_back > 0:
+                    print(f"[screener] {exchange} {bar_min}min: loaded {days_back}d-old cache ({d})")
+                return data
+            except Exception:
+                pass
     return None
 
 def _save_intraday_cache(exchange: str, bar_min: int, data: Dict[str, pd.DataFrame]):
@@ -1125,13 +1133,23 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     return data
 
 def _load_ohlcv_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
-    p = _ohlcv_cache_path(exchange)
-    if p.exists():
-        try:
-            with open(p, "rb") as f:
-                return pickle.load(f)
-        except Exception:
-            pass
+    """Load today's cache, or fall back to the most recent cache up to 5 days old.
+    Stale daily data is fine — live bar injection patches today's bar during market hours,
+    and the prewarm job refreshes the cache each morning before market open.
+    """
+    today = datetime.date.today()
+    for days_back in range(6):  # today → 5 trading days back
+        d = today - datetime.timedelta(days=days_back)
+        p = OHLCV_CACHE_DIR / f"{exchange}_{d.isoformat()}.pkl"
+        if p.exists():
+            try:
+                data = pickle.load(open(p, "rb"))
+                if days_back > 0:
+                    print(f"[screener] {exchange}: loaded {days_back}d-old cache ({d}) — "
+                          f"prewarm will refresh; live bars patch today's prices")
+                return data
+            except Exception:
+                pass
     return None
 
 def _save_ohlcv_cache(exchange: str, data: Dict[str, pd.DataFrame]):
