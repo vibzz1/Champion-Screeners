@@ -67,6 +67,20 @@ async def startup_event():
 def screener_progress():
     return dict(_SCREEN_PROGRESS)
 
+@app.get("/api/cache/status")
+def cache_status():
+    import datetime
+    files = []
+    if OHLCV_CACHE_DIR.exists():
+        for f in sorted(OHLCV_CACHE_DIR.iterdir()):
+            files.append({"name": f.name, "size_mb": round(f.stat().st_size / 1_048_576, 1)})
+    return {
+        "cache_dir": str(OHLCV_CACHE_DIR),
+        "exists": OHLCV_CACHE_DIR.exists(),
+        "today": datetime.date.today().isoformat(),
+        "files": files,
+    }
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
