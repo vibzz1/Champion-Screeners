@@ -965,9 +965,9 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
         return None
 
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
-DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
-DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
-DOWNLOAD_WORKERS        = 3     # concurrent batch downloads
+DOWNLOAD_BATCH          = 500   # tickers per yf.download() call (daily)
+DOWNLOAD_BATCH_INTRADAY = 100   # tickers per yf.download() call (15min)
+DOWNLOAD_WORKERS        = 6     # concurrent batch downloads
 
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
@@ -1076,13 +1076,16 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
 
     # ── yfinance for remaining tickers ───────────────────────────────────
     if yf_tickers:
-        n_batches = (len(yf_tickers) + DOWNLOAD_BATCH_INTRADAY - 1) // DOWNLOAD_BATCH_INTRADAY
+        intra_batches = [yf_tickers[i: i + DOWNLOAD_BATCH_INTRADAY]
+                         for i in range(0, len(yf_tickers), DOWNLOAD_BATCH_INTRADAY)]
+        n_batches = len(intra_batches)
         print(f"[screener] {exchange} {bar_min}min (yfinance): downloading {len(yf_tickers)} tickers "
-              f"in {n_batches} batches (15m→{bar_min}m)…")
+              f"in {n_batches} batches × {DOWNLOAD_WORKERS} parallel workers (15m→{bar_min}m)…")
         _SCREEN_PROGRESS.update({"phase": "downloading", "done": 0, "total": n_batches, "exchange": exchange, "bar_min": bar_min})
-        for i in range(0, len(yf_tickers), DOWNLOAD_BATCH_INTRADAY):
-            batch = yf_tickers[i : i + DOWNLOAD_BATCH_INTRADAY]
-            b_num = i // DOWNLOAD_BATCH_INTRADAY + 1
+        _intra_done = [0]
+
+        def _fetch_intraday_batch(args):
+            b_num, batch = args
             try:
                 raw = yf.download(
                     batch, period="60d", interval="15m", auto_adjust=True,
@@ -1090,22 +1093,31 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                 )
                 if raw is None or raw.empty:
                     print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: empty")
-                    _SCREEN_PROGRESS["done"] = b_num
-                    continue
-                ok = 0
+                    _intra_done[0] += 1
+                    _SCREEN_PROGRESS["done"] = _intra_done[0]
+                    return {}
+                result, ok = {}, 0
                 for ticker in batch:
                     df_15 = _normalize_df(raw, ticker)
                     if df_15 is None:
                         continue
                     df_bar = _resample_intraday(df_15, exchange, bar_min)
                     if df_bar is not None:
-                        data[ticker] = df_bar
+                        result[ticker] = df_bar
                         ok += 1
                 print(f"[screener] {bar_min}min batch {b_num}/{n_batches}: {ok}/{len(batch)} OK")
-                _SCREEN_PROGRESS["done"] = b_num
+                _intra_done[0] += 1
+                _SCREEN_PROGRESS["done"] = _intra_done[0]
+                return result
             except Exception as e:
                 print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
-                _SCREEN_PROGRESS["done"] = b_num
+                _intra_done[0] += 1
+                _SCREEN_PROGRESS["done"] = _intra_done[0]
+                return {}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+            for batch_data in pool.map(_fetch_intraday_batch, enumerate(intra_batches, 1)):
+                data.update(batch_data)
 
     print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
     if len(data) >= max(10, len(tickers) * 0.1):   # save if ≥10% covered
