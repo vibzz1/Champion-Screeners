@@ -463,6 +463,7 @@ export default function ScreenerPage() {
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
+  const [chartCols, setChartCols]    = useState<1|2>(1);
   const [sidebarOpen, setSBO]        = useState(true);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -928,17 +929,31 @@ export default function ScreenerPage() {
                         </button>
                       ))}
                     </div>
-                    {/* Chart height — only in charts view */}
+                    {/* Chart controls — only in charts view */}
                     {view==="charts" && (
-                      <div className="flex border border-gray-200 rounded overflow-hidden">
-                        {(["sm","md","lg"] as const).map((s,i)=>(
-                          <button key={s} onClick={()=>setChartSize(s)}
-                            className="px-2 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#003366":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
-                            {s.toUpperCase()}
-                          </button>
-                        ))}
-                      </div>
+                      <>
+                        {/* Height */}
+                        <div className="flex border border-gray-200 rounded overflow-hidden">
+                          {(["sm","md","lg"] as const).map((s,i)=>(
+                            <button key={s} onClick={()=>setChartSize(s)}
+                              className="px-2 py-1 text-[10px] font-medium transition-colors"
+                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#003366":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                              {s.toUpperCase()}
+                            </button>
+                          ))}
+                        </div>
+                        {/* Layout: 1-col / 2-col */}
+                        <div className="flex border border-gray-200 rounded overflow-hidden">
+                          <button onClick={()=>setChartCols(1)}
+                            className="px-2.5 py-1 text-[10px] font-medium transition-colors"
+                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#003366":"#888",borderRight:"1px solid #e5e7eb"}}
+                            title="1 column">▬</button>
+                          <button onClick={()=>setChartCols(2)}
+                            className="px-2.5 py-1 text-[10px] font-medium transition-colors"
+                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#003366":"#888"}}
+                            title="2 columns">⊞</button>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -1079,52 +1094,78 @@ export default function ScreenerPage() {
                     Reset
                   </button>
                 </div>
-                <div className="p-3 flex flex-col gap-3">
+                <div className={`p-3 grid gap-3 ${chartCols===2?"grid-cols-2":"grid-cols-1"}`}>
                   {paged.map(r=>{
                     const up=(r.change_pct??0)>=0;
                     const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                     return (
-                      <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden w-full">
-                        {/* Header row */}
-                        <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
-                          {/* Star + Symbol + badges */}
-                          <div className="flex items-center gap-2 min-w-[120px]">
-                            <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
-                              className="text-xl leading-none transition-colors shrink-0"
-                              style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
-                              {favorites[r.ticker] ? "★" : "☆"}
-                            </button>
-                            <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
-                            {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
+                      <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                        {chartCols===1 ? (
+                          /* ── 1-col: full horizontal header ── */
+                          <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
+                            <div className="flex items-center gap-2 min-w-[120px]">
+                              <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
+                                className="text-xl leading-none transition-colors shrink-0"
+                                style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
+                                {favorites[r.ticker] ? "★" : "☆"}
+                              </button>
+                              <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
+                              {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
+                              <span className="text-[11px] text-gray-400">
+                                <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}}
+                                  className="hover:text-blue-600 hover:underline">{r.sector}</button>
+                                {r.industry ? ` · ${r.industry}` : ""}
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
+                              <div className="text-sm font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                            </div>
+                            <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
+                              <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
+                              <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
+                              <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
+                              <div>{fmtCap(r.market_cap,active?.exchange??"NSE")}</div>
+                              <div className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></div>
+                              <div className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></div>
+                              <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
+                              {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
+                            </div>
                           </div>
-                          {/* Company + sector */}
-                          <div className="flex-1 min-w-0">
-                            <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
-                            <span className="text-[11px] text-gray-400">
-                              <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}}
-                                className="hover:text-blue-600 hover:underline">{r.sector}</button>
-                              {r.industry ? ` · ${r.industry}` : ""}
-                            </span>
+                        ) : (
+                          /* ── 2-col: compact stacked header ── */
+                          <div className="px-3 py-2 border-b border-gray-100">
+                            <div className="flex items-center gap-1.5">
+                              <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
+                                className="text-base leading-none transition-colors shrink-0"
+                                style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
+                                {favorites[r.ticker] ? "★" : "☆"}
+                              </button>
+                              <span className="font-bold text-sm" style={{color:"#003399"}}>{r.symbol}</span>
+                              {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                              <span className="rounded px-1 py-0.5 text-[9px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
+                              <div className="flex-1 min-w-0 mx-1">
+                                <span className="text-xs text-gray-600 font-medium truncate block">{r.name}</span>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-semibold text-sm tabular-nums">{r.price?.toLocaleString()}</div>
+                                <div className="text-xs font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                              </div>
+                            </div>
+                            <div className="flex gap-2.5 mt-1.5 text-[10px] text-gray-500 flex-wrap">
+                              <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
+                              <span style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</span>
+                              <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
+                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
+                              {earnings[r.ticker] && <span style={{color:earningsColor(earnings[r.ticker]),fontWeight:600}}>E:{fmtEarnings(earnings[r.ticker])}</span>}
+                            </div>
                           </div>
-                          {/* Price + change */}
-                          <div className="text-right shrink-0">
-                            <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
-                            <div className="text-sm font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
-                          </div>
-                          {/* Key stats */}
-                          <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
-                            <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
-                            <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
-                            <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
-                            <div>{fmtCap(r.market_cap,active?.exchange??"NSE")}</div>
-                            <div className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></div>
-                            <div className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></div>
-                            <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
-                            {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
-                          </div>
-                        </div>
-                        {/* Full-width interactive chart */}
+                        )}
+                        {/* Interactive chart */}
                         <InteractiveChart data={r.ohlcv} masterBars={masterZoom} priceHeight={CHART_H[chartSize]}/>
                       </div>
                     );
