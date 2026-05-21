@@ -10,38 +10,56 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache
 
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
 # ── Cache pre-warm scheduler ────────────────────────────────────────────────
-def _prewarm_background():
-    """Run prewarm in a daemon thread — won't block startup."""
+def _prewarm_daily_background():
+    """Warm daily OHLCV cache — runs at 08:00 IST (2:30 UTC) Mon–Fri."""
     try:
         prewarm_ohlcv_cache(["NSE"])
     except Exception as e:
-        print(f"[prewarm] background thread error: {e}")
+        print(f"[prewarm] daily background error: {e}")
+
+def _prewarm_intraday_background():
+    """Warm intraday OHLCV cache — runs at 09:45 IST (4:15 UTC) Mon–Fri.
+    Scheduled 30 min after NSE opens (09:15 IST) so today's bars exist."""
+    try:
+        prewarm_intraday_ohlcv_cache([("NSE", 75)])
+    except Exception as e:
+        print(f"[prewarm] intraday background error: {e}")
 
 @app.on_event("startup")
 async def startup_event():
-    # 1. Pre-warm on startup (no-op if cache already fresh)
-    threading.Thread(target=_prewarm_background, daemon=True).start()
+    # 1. Pre-warm daily cache on startup (no-op if already fresh)
+    threading.Thread(target=_prewarm_daily_background, daemon=True).start()
+    # 1b. Also kick off intraday pre-warm on startup (no-op if cache fresh)
+    threading.Thread(target=_prewarm_intraday_background, daemon=True).start()
 
-    # 2. Schedule daily pre-warm at 8:00 AM IST (2:30 AM UTC) Mon–Fri
+    # 2. Schedule daily pre-warm jobs Mon–Fri
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
         scheduler = BackgroundScheduler(timezone=pytz.utc)
+        # Daily OHLCV: 08:00 IST = 02:30 UTC
         scheduler.add_job(
-            _prewarm_background,
+            _prewarm_daily_background,
             CronTrigger(hour=2, minute=30, day_of_week="mon-fri", timezone=pytz.utc),
-            id="nse_prewarm",
+            id="nse_prewarm_daily",
+            replace_existing=True,
+        )
+        # Intraday OHLCV: 09:45 IST = 04:15 UTC  (30 min after NSE open)
+        scheduler.add_job(
+            _prewarm_intraday_background,
+            CronTrigger(hour=4, minute=15, day_of_week="mon-fri", timezone=pytz.utc),
+            id="nse_prewarm_intraday",
             replace_existing=True,
         )
         scheduler.start()
-        print("[prewarm] Scheduler started — NSE cache warm daily at 08:00 IST (Mon–Fri)")
+        print("[prewarm] Scheduler started — daily@08:00IST, intraday@09:45IST (Mon–Fri)")
     except Exception as e:
         print(f"[prewarm] Scheduler setup failed: {e}")
 

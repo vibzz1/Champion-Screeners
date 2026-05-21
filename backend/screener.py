@@ -966,7 +966,7 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
 
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
 DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
-DOWNLOAD_BATCH_INTRADAY = 100   # tickers per yf.download() call (15min)
+DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
 DOWNLOAD_WORKERS        = 3     # concurrent batch downloads
 
 def _ohlcv_cache_path(exchange: str) -> Path:
@@ -1094,7 +1094,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                 print(f"[screener] {bar_min}min batch {b_num}/{n_batches} failed: {type(e).__name__}: {e}")
 
     print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
-    if len(data) >= max(20, len(tickers) * 0.3):
+    if len(data) >= max(10, len(tickers) * 0.1):   # save if ≥10% covered
         _save_intraday_cache(exchange, bar_min, data)
     return data
 
@@ -1903,3 +1903,26 @@ def prewarm_ohlcv_cache(exchanges: List[str] = None) -> None:
             print(f"[prewarm] {exchange}: done ✓")
         except Exception as e:
             print(f"[prewarm] {exchange} error: {type(e).__name__}: {e}")
+
+
+def prewarm_intraday_ohlcv_cache(exchange_bars: List[tuple] = None) -> None:
+    """Pre-download intraday (15m→bar_min resampled) OHLCV.
+    exchange_bars: list of (exchange, bar_min) pairs.
+    Safe to call any time — skips if today's cache already exists.
+    Designed to run ~30min after market open so bars are available."""
+    if exchange_bars is None:
+        exchange_bars = [("NSE", 75)]
+    for exchange, bar_min in exchange_bars:
+        try:
+            tickers = UNIVERSES.get(exchange, [])
+            if not tickers:
+                continue
+            cached = _load_intraday_cache(exchange, bar_min)
+            if cached is not None:
+                print(f"[prewarm] {exchange} {bar_min}min: cache fresh ({len(cached)} tickers) — skip")
+                continue
+            print(f"[prewarm] {exchange} {bar_min}min: cache stale — downloading {len(tickers)} tickers…")
+            _download_intraday_ohlcv(exchange, tickers, bar_min)
+            print(f"[prewarm] {exchange} {bar_min}min: done ✓")
+        except Exception as e:
+            print(f"[prewarm] {exchange} {bar_min}min error: {type(e).__name__}: {e}")
