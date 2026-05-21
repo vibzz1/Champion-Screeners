@@ -462,6 +462,7 @@ export default function ScreenerPage() {
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [jumpToTicker, setJumpToTicker]   = useState<string | null>(null);
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
@@ -605,6 +606,16 @@ export default function ScreenerPage() {
       if (resultsRef.current) resultsRef.current.scrollTop = 0;
     }));
   }
+
+  // Jump to a specific chart card when navigating from table → charts view
+  useEffect(() => {
+    if (!jumpToTicker || view !== "charts") return;
+    const t = setTimeout(() => {
+      document.getElementById(`chart-${jumpToTicker}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setJumpToTicker(null);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [jumpToTicker, view]);
 
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
@@ -1088,8 +1099,15 @@ export default function ScreenerPage() {
                           </button>
                         </td>
                         <td className="border border-gray-200 px-2 py-1 text-gray-400">{(page-1)*pageSize+idx+1}</td>
-                        <td className="border border-gray-200 px-2 py-1 font-bold whitespace-nowrap" style={{color:"#003399"}}>
-                          {r.symbol}{r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
+                        <td className="border border-gray-200 px-2 py-1 font-bold whitespace-nowrap">
+                          <button
+                            onClick={()=>{ setJumpToTicker(r.ticker); setView("charts"); }}
+                            className="hover:underline"
+                            style={{color:"#003399"}}
+                            title="View chart">
+                            {r.symbol}
+                          </button>
+                          {r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
                         </td>
                         <td className="border border-gray-200 px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
                         <td className="border border-gray-200 px-2 py-1">
@@ -1146,7 +1164,7 @@ export default function ScreenerPage() {
                     const up=(r.change_pct??0)>=0;
                     const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                     return (
-                      <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+                      <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "#003366" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
                         {chartCols===1 ? (
                           /* ── 1-col: full horizontal header ── */
                           <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
