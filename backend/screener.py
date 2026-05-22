@@ -1333,9 +1333,22 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                     break
 
         if not has_today:
-            # Stale cache — top-up with today's bars then save as today's file
+            # Stale cache — top-up with today's bars.
+            # Only save (and rename to today's file) if top-up actually got bars.
+            # If top-up fails (yfinance down etc.) keep the old file intact so
+            # the 5-day stale window still expires normally → cold-start triggers.
             cached = _topup_ohlcv(exchange, cached, tickers)
-            _save_ohlcv_cache(exchange, cached)
+            # Re-check: did top-up succeed for at least some tickers?
+            got_today = any(
+                (df := cached.get(t)) is not None and not df.empty
+                and str(df.index[-1])[:10] == today_str
+                for t in list(cached.keys())[:20]
+            )
+            if got_today:
+                _save_ohlcv_cache(exchange, cached)
+                print(f"[screener] {exchange}: top-up succeeded — saved as today's cache")
+            else:
+                print(f"[screener] {exchange}: top-up got 0 bars — keeping old cache file intact")
 
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
         _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": 0})
@@ -1949,42 +1962,62 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     except Exception as e:
         print(f"[screener] nselib error ({type(e).__name__}) — using yfinance fallback")
 
-    # ── Fallback: yfinance today's bars ───────────────────────────────────────
+    # ── Fallback: yfinance today's bars (parallel) ───────────────────────────
     if not result:
-        print("[screener] NSE live fallback: yfinance period=5d …")
-        try:
-            today = datetime.date.today().isoformat()
-            batches = [tickers[i: i + 400] for i in range(0, len(tickers), 400)]
-            for batch in batches:
-                try:
-                    raw = yf.download(batch, period="5d", interval="1d",
-                                      auto_adjust=True, progress=False,
-                                      group_by="ticker", threads=True)
-                    if raw is None or raw.empty:
-                        continue
-                    for ticker in batch:
-                        try:
-                            df_t = _normalize_df(raw, ticker)
-                            if df_t is None or df_t.empty:
+        print("[screener] NSE live fallback: yfinance period=5d parallel …")
+        today_str = datetime.date.today().isoformat()
+        batches = [tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(tickers), DOWNLOAD_BATCH)]
+
+        def _live_batch(batch):
+            batch_result = {}
+            try:
+                raw = yf.download(batch, period="5d", interval="1d",
+                                  auto_adjust=True, progress=False,
+                                  group_by="ticker", threads=True)
+                if raw is None or raw.empty:
+                    return batch_result
+                for ticker in batch:
+                    try:
+                        # Direct extraction — do NOT use _normalize_df (requires ≥30 rows)
+                        if isinstance(raw.columns, pd.MultiIndex):
+                            lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                            lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                                    if raw.columns.nlevels > 1 else [])
+                            if ticker in lvl0:
+                                df_t = raw[ticker].copy()
+                            elif ticker in lvl1:
+                                df_t = raw.xs(ticker, axis=1, level=1).copy()
+                            else:
                                 continue
-                            # Only use if last row is today
-                            last_date = df_t.index[-1]
-                            if hasattr(last_date, 'tz') and last_date.tz:
-                                last_date = last_date.tz_localize(None)
-                            if str(last_date.date()) != today:
-                                continue
-                            row = df_t.iloc[-1]
-                            result[ticker] = {
-                                "open":   float(row["Open"]),
-                                "high":   float(row["High"]),
-                                "low":    float(row["Low"]),
-                                "close":  float(row["Close"]),
-                                "volume": int(float(row["Volume"])),
-                            }
-                        except Exception:
+                            if isinstance(df_t.columns, pd.MultiIndex):
+                                df_t.columns = df_t.columns.get_level_values(-1)
+                        else:
+                            df_t = raw.copy()
+
+                        df_t = df_t[[c for c in ["Open","High","Low","Close","Volume"]
+                                     if c in df_t.columns]].dropna(subset=["Close"])
+                        if df_t.empty or "Close" not in df_t.columns:
                             continue
-                except Exception:
-                    continue
+                        if str(df_t.index[-1])[:10] != today_str:
+                            continue
+                        row = df_t.iloc[-1]
+                        batch_result[ticker] = {
+                            "open":   float(row["Open"]),
+                            "high":   float(row["High"]),
+                            "low":    float(row["Low"]),
+                            "close":  float(row["Close"]),
+                            "volume": int(float(row.get("Volume", 0))),
+                        }
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return batch_result
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+                for batch_result in pool.map(_live_batch, batches):
+                    result.update(batch_result)
             print(f"[screener] NSE live (yfinance fallback): {len(result)}/{len(tickers)} bars")
         except Exception as e:
             print(f"[screener] NSE live fallback error: {type(e).__name__}: {e}")
