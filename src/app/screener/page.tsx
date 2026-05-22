@@ -2,9 +2,9 @@
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "XETRA"];
+const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "XETRA"];
 const PAGE_SIZES = [20, 50, 100];
-const LS_KEY = "mio_screeners_v5";
+const LS_KEY = "mio_screeners_v6";
 
 const CAP_COLORS: Record<string, string> = {
   Mega: "#7c3aed", Large: "#1d4ed8", Mid: "#0f766e", Small: "#92400e",
@@ -42,8 +42,9 @@ const DEFAULTS: SavedScreener[] = [
   { id: "d5", name: "India Setup Scan 75m", exchange: "NSE",   interval: "75min", formula: "advol(20) > 30 and advol(50) > 30 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 10 and price > 10 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d6", name: "US Setup Scan 78m",    exchange: "SP500", interval: "78min", formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 30 and price > 5 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d7", name: "Japan Setup Scan",     exchange: "TSE",   formula: "advol(20) > 1000 and advol(50) > 1000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 200 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d8", name: "Korea Setup Scan",     exchange: "KOSPI", formula: "advol(20) > 5000 and advol(50) > 5000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 500 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d9", name: "Germany Setup Scan",   exchange: "XETRA", formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 2 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d8", name: "Korea Setup Scan (KOSPI)",  exchange: "KOSPI",  formula: "advol(20) > 5000 and advol(50) > 5000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 500 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d10", name: "Korea Setup Scan (KOSDAQ)", exchange: "KOSDAQ", formula: "advol(20) > 2000 and advol(50) > 2000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 200 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d9", name: "Germany Setup Scan",    exchange: "XETRA",  formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)\n\nadvol(20) > 2 and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
 ];
 
 // ── Quick-add chips ────────────────────────────────────────────────────────
@@ -288,7 +289,7 @@ function fmtCap(cap: number|null, exchange: string) {
   if(exchange==="TSE"){
     if(cap>=1000000) return `¥${(cap/1000000).toFixed(1)}T`; if(cap>=1000) return `¥${(cap/1000).toFixed(0)}B`; return `¥${cap}M`;
   }
-  if(exchange==="KOSPI"){
+  if(exchange==="KOSPI"||exchange==="KOSDAQ"){
     if(cap>=1000000) return `₩${(cap/1000000).toFixed(1)}T`; if(cap>=1000) return `₩${(cap/1000).toFixed(0)}B`; return `₩${cap}M`;
   }
   if(exchange==="XETRA"){
@@ -473,6 +474,7 @@ function ScanProgress({ progress, startMs, exchange }: {
 
   const phaseLabel =
     isCache       ? "Loaded from cache" :
+    phase === "topup"       ? `Refreshing today's bars · batch ${progress?.done ?? 0} / ${progress?.total ?? "…"}` :
     phase === "downloading" ? `Downloading ${progress?.exchange || exchange} · batch ${progress?.done ?? 0} / ${progress?.total ?? "…"}` :
     phase === "filtering"   ? `Filtering ${progress?.exchange || exchange} stocks…` :
     phase === "idle"        ? "Finalising…" :

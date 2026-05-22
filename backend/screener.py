@@ -476,6 +476,7 @@ _BSE_TICKERS    = _load_tickers("bse_tickers.txt",     ".BO")
 _SP500_TICKERS  = _load_tickers("sp500_tickers.txt",   "")    # no suffix — US tickers as-is
 _JAPAN_TICKERS  = _load_tickers("japan_tickers.txt",   ".T")  # Tokyo Stock Exchange
 _KOREA_TICKERS  = _load_tickers("korea_tickers.txt",   ".KS") # KOSPI
+_KOSDAQ_TICKERS = _load_tickers("kosdaq_tickers.txt",  ".KQ") # KOSDAQ
 _GERMANY_TICKERS= _load_tickers("germany_tickers.txt", ".DE") # XETRA Frankfurt
 
 UNIVERSES = {
@@ -493,7 +494,8 @@ UNIVERSES = {
                 "CAT","DE","HON","MMM","GE","BA","RTX","LMT","NOC","GD",
                 "T","VZ","CMCSA","NEE","DUK","SO","D","AEP","EXC","PCG"],
     "TSE":     _JAPAN_TICKERS,   # Tokyo Stock Exchange
-    "KOSPI":   _KOREA_TICKERS,   # Korea Stock Exchange
+    "KOSPI":   _KOREA_TICKERS,   # Korea Stock Exchange (main board)
+    "KOSDAQ":  _KOSDAQ_TICKERS,  # Korea KOSDAQ (tech/growth board)
     "XETRA":   _GERMANY_TICKERS, # Frankfurt / Xetra
 }
 
@@ -989,27 +991,36 @@ def _ohlcv_cache_path(exchange: str) -> Path:
 
 def _intraday_bar_minutes(exchange: str) -> int:
     """Return the canonical intraday bar size (minutes) for an exchange.
-    NSE/BSE: 9:15–15:30 = 375 min → 5 bars × 75 min
-    US (NYSE/NASDAQ/SP500…): 9:30–16:00 = 390 min → 5 bars × 78 min
+    NSE/BSE:        9:15–15:30 = 375 min → 5 bars × 75 min
+    US:             9:30–16:00 = 390 min → 5 bars × 78 min
+    TSE:            9:00–15:30 (lunch 11:30–12:30) = 330 min → use 78 min (4 bars)
+    KOSPI/KOSDAQ:   9:00–15:30 = 390 min → 5 bars × 78 min
+    XETRA:          9:00–17:30 = 510 min → use 78 min (6 bars)
     """
-    return 75 if exchange in ("NSE", "BSE") else 78
+    if exchange in ("NSE", "BSE"):
+        return 75
+    return 78  # default for US, Korea, Germany, Japan
 
 def _ohlcv_intraday_cache_path(exchange: str, bar_min: int) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{datetime.date.today().isoformat()}.pkl"
 
 def _load_intraday_cache(exchange: str, bar_min: int) -> Optional[Dict[str, pd.DataFrame]]:
-    """Load today's intraday cache, or fall back up to 3 days old.
-    Intraday data is only valid same-day, so keep the lookback short.
+    """Load today's intraday cache; fall back to yesterday's if today's doesn't exist yet.
+    A 1-day fallback means early morning runs (before the first complete bar) use
+    yesterday's complete bars rather than triggering a slow fresh download that
+    produces a tiny partial bar which kills the ATR filter.
+    The _resample_intraday function drops any partial last bar automatically, so
+    yesterday's data arriving here is safe — it will show the most recent complete setup.
     """
     today = datetime.date.today()
-    for days_back in range(4):  # today → 3 days back
+    for days_back in range(2):   # today (0) → yesterday (1) only
         d = today - datetime.timedelta(days=days_back)
         p = OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{d.isoformat()}.pkl"
         if p.exists():
             try:
                 data = pickle.load(open(p, "rb"))
                 if days_back > 0:
-                    print(f"[screener] {exchange} {bar_min}min: loaded {days_back}d-old cache ({d})")
+                    print(f"[screener] {exchange} {bar_min}min: loaded yesterday's cache ({d})")
                 return data
             except Exception:
                 pass
@@ -1031,8 +1042,21 @@ def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Opti
         return None
     try:
         idx = df_15.index
-        tz_name = "Asia/Kolkata" if exchange in ("NSE", "BSE") else "America/New_York"
-        offset  = pd.Timedelta("9h15min") if exchange in ("NSE", "BSE") else pd.Timedelta("9h30min")
+        if exchange in ("NSE", "BSE"):
+            tz_name = "Asia/Kolkata"
+            offset  = pd.Timedelta("9h15min")
+        elif exchange in ("KOSPI", "KOSDAQ"):
+            tz_name = "Asia/Seoul"
+            offset  = pd.Timedelta("9h0min")
+        elif exchange == "TSE":
+            tz_name = "Asia/Tokyo"
+            offset  = pd.Timedelta("9h0min")
+        elif exchange == "XETRA":
+            tz_name = "Europe/Berlin"
+            offset  = pd.Timedelta("9h0min")
+        else:
+            tz_name = "America/New_York"
+            offset  = pd.Timedelta("9h30min")
 
         # Ensure tz-aware
         if idx.tz is None:
@@ -1049,6 +1073,22 @@ def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Opti
         )
         df_out = df_out.dropna(subset=["Open", "Close"])
         df_out = df_out[df_out["Volume"] > 0]
+
+        # Drop the last bar if it's still forming (started < bar_min minutes ago).
+        # A partial bar has a tiny ATR that would kill the atr(1) > atr(20)*0.6 filter,
+        # producing 0 results until the first complete bar of the day is available.
+        if not df_out.empty:
+            try:
+                now_local  = pd.Timestamp.now(tz=tz_name)
+                last_start = df_out.index[-1]  # still tz-aware at this point
+                elapsed_min = (now_local - last_start).total_seconds() / 60
+                if elapsed_min < bar_min:
+                    df_out = df_out.iloc[:-1]
+                    print(f"[screener] {exchange}: dropped partial {bar_min}m bar "
+                          f"({elapsed_min:.0f}m elapsed, need {bar_min}m)")
+            except Exception:
+                pass  # tz comparison edge-case — keep all bars
+
         # Strip timezone for consistency with daily data
         df_out.index = df_out.index.tz_localize(None)
         return df_out if len(df_out) >= 20 else None
@@ -1166,6 +1206,72 @@ def _save_ohlcv_cache(exchange: str, data: Dict[str, pd.DataFrame]):
     with open(_ohlcv_cache_path(exchange), "wb") as f:
         pickle.dump(data, f, protocol=4)
 
+def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str]) -> Dict[str, pd.DataFrame]:
+    """Lightweight parallel top-up: fetch today's partial daily bar for all tickers.
+
+    Called when the stale cache is loaded but doesn't yet contain today's bars.
+    Uses period='2d' (yesterday + today) so we only download ~2 rows per ticker.
+    Runs with the same parallel worker pool as the full download (~10-15s for 2000 tickers).
+    Merges today's row into the existing historical data and saves as today's cache.
+    """
+    today_str = datetime.date.today().isoformat()
+    batches = [tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(tickers), DOWNLOAD_BATCH)]
+    n_batches = len(batches)
+    _done_topup = [0]
+
+    def _fetch_topup_batch(args):
+        b_num, batch = args
+        try:
+            raw = yf.download(
+                batch, period="2d", auto_adjust=True,
+                progress=False, group_by="ticker", threads=True,
+            )
+            result = {}
+            if raw is None or raw.empty:
+                return result
+            for ticker in batch:
+                df = _normalize_df(raw, ticker)
+                if df is None or df.empty:
+                    continue
+                # Only keep today's row
+                last_str = str(df.index[-1])[:10]
+                if last_str == today_str:
+                    result[ticker] = df.iloc[[-1]]
+            return result
+        except Exception as e:
+            print(f"[screener] top-up batch {b_num}/{n_batches}: {type(e).__name__}: {e}")
+            return {}
+        finally:
+            _done_topup[0] += 1
+            _SCREEN_PROGRESS["done"] = _done_topup[0]
+
+    print(f"[screener] {exchange}: topping up {len(tickers)} tickers with today's bar "
+          f"({n_batches} batches × {DOWNLOAD_WORKERS} workers)…")
+    _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches, "exchange": exchange, "bar_min": 0})
+
+    today_bars: Dict[str, pd.DataFrame] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        for batch_data in pool.map(_fetch_topup_batch, enumerate(batches, 1)):
+            today_bars.update(batch_data)
+
+    print(f"[screener] {exchange}: top-up got {len(today_bars)}/{len(tickers)} tickers for {today_str}")
+
+    # Merge today's row into the historical data
+    for ticker, day_df in today_bars.items():
+        if ticker in data:
+            df_old = data[ticker]
+            # Drop any existing today row from the cached data
+            try:
+                mask = df_old.index.normalize().tz_localize(None) >= pd.Timestamp(today_str)
+            except TypeError:
+                mask = df_old.index.normalize() >= pd.Timestamp(today_str)
+            data[ticker] = pd.concat([df_old[~mask], day_df])
+        else:
+            data[ticker] = day_df
+
+    return data
+
+
 def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame]:
     """Download 1Y OHLCV for all tickers in batches; cache to disk.
 
@@ -1174,9 +1280,31 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
 
     For NSE/BSE: tries Angel One SmartAPI first (400 days); yfinance fallback for any missed symbols.
     For US exchanges: yfinance only.
+
+    Cache strategy:
+      - Today's cache exists  → return instantly (already has today's bars)
+      - Stale cache (≤5 days) → load it, run a fast parallel period='2d' top-up to add
+                                 today's partial bar, save as today's cache, return
+      - No cache              → full cold-start download (period='1y'), save, return
     """
     cached = _load_ohlcv_cache(exchange)
     if cached is not None:
+        # Check whether the cache already contains today's bars.
+        # Sample up to 10 tickers; if any has today's date we're fresh.
+        today_str = datetime.date.today().isoformat()
+        has_today = False
+        for t in list(cached.keys())[:10]:
+            df = cached.get(t)
+            if df is not None and not df.empty:
+                if str(df.index[-1])[:10] == today_str:
+                    has_today = True
+                    break
+
+        if not has_today:
+            # Stale cache — top-up with today's bars then save as today's file
+            cached = _topup_ohlcv(exchange, cached, tickers)
+            _save_ohlcv_cache(exchange, cached)
+
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
         _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": 0})
         return cached
@@ -1726,7 +1854,7 @@ def _is_market_open(exchange: str) -> bool:
             datetime.time(9, 0) <= t <= datetime.time(11, 30) or
             datetime.time(12, 30) <= t <= datetime.time(15, 30)
         )
-    elif exchange == "KOSPI":
+    elif exchange in ("KOSPI", "KOSDAQ"):
         tz   = pytz.timezone("Asia/Seoul")
         now  = now_utc.astimezone(tz)
         open_, close_ = datetime.time(9, 0), datetime.time(15, 30)
