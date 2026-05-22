@@ -1033,7 +1033,7 @@ def _save_intraday_cache(exchange: str, bar_min: int, data: Dict[str, pd.DataFra
     with open(_ohlcv_intraday_cache_path(exchange, bar_min), "wb") as f:
         pickle.dump(data, f, protocol=4)
 
-def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Optional[pd.DataFrame]:
+def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int, min_bars: int = 20) -> Optional[pd.DataFrame]:
     """Resample 15-min OHLCV to bar_min-min bars aligned to exchange market open.
     NSE/BSE offset: 9h15m (market opens 09:15 IST)
     US offset: 9h30m (market opens 09:30 ET)
@@ -1091,10 +1091,127 @@ def _resample_intraday(df_15: pd.DataFrame, exchange: str, bar_min: int) -> Opti
 
         # Strip timezone for consistency with daily data
         df_out.index = df_out.index.tz_localize(None)
-        return df_out if len(df_out) >= 20 else None
+        return df_out if len(df_out) >= min_bars else None
     except Exception as e:
         print(f"[screener] _resample_intraday({bar_min}min) error: {type(e).__name__}: {e}")
         return None
+
+
+def _load_intraday_cache_prev(exchange: str, bar_min: int) -> Optional[Dict[str, pd.DataFrame]]:
+    """Load the most recent intraday cache PRIOR to today (1–7 days back).
+    Used by the top-up path to get yesterday's history without a full re-download.
+    """
+    today = datetime.date.today()
+    for days_back in range(1, 8):
+        d = today - datetime.timedelta(days=days_back)
+        p = OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{d.isoformat()}.pkl"
+        if p.exists():
+            try:
+                data = pickle.load(open(p, "rb"))
+                print(f"[screener] {exchange} {bar_min}min: loaded {days_back}d-old intraday cache for top-up")
+                return data
+            except Exception:
+                pass
+    return None
+
+
+def _topup_intraday(
+    exchange: str,
+    prev_data: Dict[str, pd.DataFrame],
+    tickers: List[str],
+    bar_min: int,
+) -> Dict[str, pd.DataFrame]:
+    """Download only today's 15-min bars, resample, and stitch onto yesterday's 75-min history.
+
+    Why: a full period='60d' download takes 5-7 min on first daily run.
+         period='1d' gives ~25 15-min bars (NSE), takes ~25-30s in parallel.
+         We concat those resampled bars onto the previous day's history (~295 bars)
+         → the combined 296-300 bars pass the ≥20 bar check and cover all SMA windows.
+    """
+    today_str = datetime.date.today().isoformat()
+    batches = [tickers[i: i + DOWNLOAD_BATCH_INTRADAY]
+               for i in range(0, len(tickers), DOWNLOAD_BATCH_INTRADAY)]
+    n_batches = len(batches)
+    _done = [0]
+
+    def _fetch_today_batch(args):
+        b_num, batch = args
+        try:
+            raw = yf.download(
+                batch, period="1d", interval="15m",
+                auto_adjust=True, progress=False,
+                group_by="ticker", threads=True,
+            )
+            result: Dict[str, pd.DataFrame] = {}
+            if raw is None or raw.empty:
+                return result
+            for ticker in batch:
+                try:
+                    # Direct extraction — _normalize_df requires ≥30 rows; period='1d'
+                    # gives ~25 15-min bars for a full NSE session, so bypass it.
+                    if isinstance(raw.columns, pd.MultiIndex):
+                        lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                        lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                                if raw.columns.nlevels > 1 else [])
+                        if ticker in lvl0:
+                            df_15 = raw[ticker].copy()
+                        elif ticker in lvl1:
+                            df_15 = raw.xs(ticker, axis=1, level=1).copy()
+                        else:
+                            continue
+                        if isinstance(df_15.columns, pd.MultiIndex):
+                            df_15.columns = df_15.columns.get_level_values(-1)
+                    else:
+                        df_15 = raw.copy()
+
+                    want = ["Open", "High", "Low", "Close", "Volume"]
+                    df_15 = df_15[[c for c in want if c in df_15.columns]].dropna(subset=["Close"])
+                    if df_15.empty:
+                        continue
+
+                    # Resample to bar_min; allow ≥1 bar (history provides the depth)
+                    df_bar = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
+                    if df_bar is not None and not df_bar.empty:
+                        result[ticker] = df_bar
+                except Exception:
+                    continue
+            return result
+        except Exception as e:
+            print(f"[screener] intraday top-up batch {b_num}/{n_batches}: {type(e).__name__}: {e}")
+            return {}
+        finally:
+            _done[0] += 1
+            _SCREEN_PROGRESS["done"] = _done[0]
+
+    print(f"[screener] {exchange} {bar_min}min: top-up today's bars "
+          f"({n_batches} batches × {DOWNLOAD_WORKERS} workers)…")
+    _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches,
+                              "exchange": exchange, "bar_min": bar_min})
+
+    today_bars: Dict[str, pd.DataFrame] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+        for bd in pool.map(_fetch_today_batch, enumerate(batches, 1)):
+            today_bars.update(bd)
+
+    print(f"[screener] {exchange} {bar_min}min: top-up got {len(today_bars)}/{len(tickers)} tickers for today")
+
+    # Stitch today's bars onto the end of each ticker's historical 75-min series
+    merged: Dict[str, pd.DataFrame] = {}
+    ts_today = pd.Timestamp(today_str)
+    for ticker in tickers:
+        hist = prev_data.get(ticker)
+        td   = today_bars.get(ticker)
+        if hist is not None:
+            # Guard: strip any stale "today" rows that might linger in prev_data
+            try:
+                mask = hist.index.normalize() >= ts_today
+                hist = hist[~mask]
+            except Exception:
+                pass
+            merged[ticker] = pd.concat([hist, td]) if td is not None else hist
+        # Skip tickers with today's bars only — too few rows for SMA(50)
+    return merged
+
 
 def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) -> Dict[str, pd.DataFrame]:
     """Download 15-min OHLCV (60 days) and resample to bar_min-min bars; cache to disk.
@@ -1102,11 +1219,26 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     For NSE/BSE: tries Angel One SmartAPI first; yfinance fallback for any missed symbols.
     For US exchanges: yfinance only.
     """
+    # ── Fast path: today's intraday cache already exists ─────────────────────
     cached = _load_intraday_cache(exchange, bar_min)
     if cached is not None:
         print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache")
         _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": bar_min})
         return cached
+
+    # ── Top-up path: yesterday's history + today's 15-min bars ───────────────
+    # Avoids a full 60-day re-download (~5-7 min) every morning.
+    # Instead: load previous 75-min cache (~instant) + fetch only today's 15-min
+    # bars (period='1d', ~25 bars per ticker, ~25-30s in parallel) → resample →
+    # stitch onto history → save as today's cache.
+    prev_cached = _load_intraday_cache_prev(exchange, bar_min)
+    if prev_cached is not None:
+        data = _topup_intraday(exchange, prev_cached, tickers, bar_min)
+        if len(data) >= max(10, len(tickers) * 0.1):
+            _save_intraday_cache(exchange, bar_min, data)
+            print(f"[screener] {exchange} {bar_min}min: top-up saved ({len(data)} tickers)")
+        _SCREEN_PROGRESS.update({"phase": "cache", "done": len(data), "total": len(data), "exchange": exchange, "bar_min": bar_min})
+        return data
 
     data: Dict[str, pd.DataFrame] = {}
     yf_tickers = list(tickers)   # shrinks as Angel One covers symbols
