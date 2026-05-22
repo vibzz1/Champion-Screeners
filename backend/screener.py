@@ -1230,13 +1230,37 @@ def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str
             if raw is None or raw.empty:
                 return result
             for ticker in batch:
-                df = _normalize_df(raw, ticker)
-                if df is None or df.empty:
+                try:
+                    # _normalize_df requires ≥30 rows — bypass it for the 2-row top-up
+                    if isinstance(raw.columns, pd.MultiIndex):
+                        lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                        lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                                if raw.columns.nlevels > 1 else [])
+                        if ticker in lvl0:
+                            df = raw[ticker].copy()
+                        elif ticker in lvl1:
+                            df = raw.xs(ticker, axis=1, level=1).copy()
+                        else:
+                            continue
+                        if isinstance(df.columns, pd.MultiIndex):
+                            df.columns = df.columns.get_level_values(-1)
+                    else:
+                        df = raw.copy()
+
+                    want = ["Open", "High", "Low", "Close", "Volume"]
+                    df = df[[c for c in want if c in df.columns]].copy()
+                    if "Close" not in df.columns or df.empty:
+                        continue
+                    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+                    if df.empty:
+                        continue
+
+                    # Only keep today's row
+                    last_str = str(df.index[-1])[:10]
+                    if last_str == today_str:
+                        result[ticker] = df.iloc[[-1]]
+                except Exception:
                     continue
-                # Only keep today's row
-                last_str = str(df.index[-1])[:10]
-                if last_str == today_str:
-                    result[ticker] = df.iloc[[-1]]
             return result
         except Exception as e:
             print(f"[screener] top-up batch {b_num}/{n_batches}: {type(e).__name__}: {e}")
@@ -1258,6 +1282,14 @@ def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str
 
     # Merge today's row into the historical data
     for ticker, day_df in today_bars.items():
+        # Ensure tz-naive index so concat doesn't raise on mixed-tz frames
+        try:
+            if getattr(day_df.index, "tz", None) is not None:
+                day_df = day_df.copy()
+                day_df.index = day_df.index.tz_localize(None)
+        except Exception:
+            pass
+
         if ticker in data:
             df_old = data[ticker]
             # Drop any existing today row from the cached data
