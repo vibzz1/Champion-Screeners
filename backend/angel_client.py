@@ -176,10 +176,17 @@ def _fetch_one_daily(token_id: str, auth_token: str) -> Optional[pd.DataFrame]:
         return None
 
 
-def _fetch_one_intraday(token_id: str, auth_token: str) -> Optional[pd.DataFrame]:
-    """Fetch 60 days of 15-min bars for resampling to 75-min."""
+def _fetch_one_intraday(token_id: str, auth_token: str, today_only: bool = False) -> Optional[pd.DataFrame]:
+    """Fetch 15-min bars for one symbol.
+
+    today_only=False (default): 60 days of history for the full intraday cache.
+    today_only=True:  only today's session (09:00–15:30) — used for the daily
+                      top-up that stitches today's bars onto yesterday's cache.
+                      Much faster per call (~25 rows vs ~1500).
+    """
     today   = datetime.date.today()
-    from_dt = (today - datetime.timedelta(days=65)).strftime("%Y-%m-%d 09:00")
+    from_dt = today.strftime("%Y-%m-%d 09:00") if today_only else \
+              (today - datetime.timedelta(days=65)).strftime("%Y-%m-%d 09:00")
     to_dt   = today.strftime("%Y-%m-%d 15:30")
     try:
         r = requests.post(
@@ -193,7 +200,11 @@ def _fetch_one_intraday(token_id: str, auth_token: str) -> Optional[pd.DataFrame
         if not data.get("status") or not data.get("data"):
             return None
         df = _to_df(data["data"])
-        return df if df is not None and len(df) >= 20 else None
+        if df is None or df.empty:
+            return None
+        # For today_only we accept any number of bars (market may have just opened);
+        # for the full download we require enough history for indicator calc.
+        return df if today_only or len(df) >= 20 else None
     except Exception:
         return None
 
@@ -202,12 +213,16 @@ def _fetch_one_intraday(token_id: str, auth_token: str) -> Optional[pd.DataFrame
 def download_nse_ohlcv(
     tickers:     List[str],
     intraday:    bool = False,
+    today_only:  bool = False,
     max_workers: int  = 6,
 ) -> Dict[str, pd.DataFrame]:
     """
     Download OHLCV for NSE tickers (SYMBOL.NS format).
     Returns {ticker: DataFrame}.  Silently skips symbols not in master.
     Falls back to {} on auth failure so caller can fall back to yfinance.
+
+    today_only=True (intraday only): fetch only today's 15-min bars (09:00–15:30).
+                  Much faster than a 60-day pull — used for the daily top-up.
     """
     auth_token = _get_token()
     if not auth_token:
@@ -230,11 +245,17 @@ def download_nse_ohlcv(
     if missing:
         print(f"[angel] {missing} symbols not in master (will use yfinance fallback)")
 
-    print(f"[angel] Fetching {'15min' if intraday else 'daily'} OHLCV for {len(jobs)} symbols "
-          f"({max_workers} workers)…")
+    mode_str = "today-only 15min" if (intraday and today_only) else ("15min" if intraday else "daily")
+    print(f"[angel] Fetching {mode_str} OHLCV for {len(jobs)} symbols ({max_workers} workers)…")
 
     result: Dict[str, pd.DataFrame] = {}
-    fetch_fn = _fetch_one_intraday if intraday else _fetch_one_daily
+
+    if intraday and today_only:
+        def fetch_fn(tid, tok): return _fetch_one_intraday(tid, tok, today_only=True)
+    elif intraday:
+        def fetch_fn(tid, tok): return _fetch_one_intraday(tid, tok, today_only=False)
+    else:
+        fetch_fn = _fetch_one_daily
 
     def _worker(args):
         ticker, tid = args

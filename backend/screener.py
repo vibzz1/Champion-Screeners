@@ -1123,75 +1123,109 @@ def _topup_intraday(
 ) -> Dict[str, pd.DataFrame]:
     """Download only today's 15-min bars, resample, and stitch onto yesterday's 75-min history.
 
+    For NSE/BSE: tries Angel One SmartAPI first (direct broker API, real-time, reliable).
+                 Falls back to yfinance for any symbols Angel One misses.
+    For others:  yfinance only.
+
     Why: a full period='60d' download takes 5-7 min on first daily run.
-         period='1d' gives ~25 15-min bars (NSE), takes ~25-30s in parallel.
+         today-only gives ~25 15-min bars per ticker in ~20-30s total.
          We concat those resampled bars onto the previous day's history (~295 bars)
          → the combined 296-300 bars pass the ≥20 bar check and cover all SMA windows.
     """
     today_str = datetime.date.today().isoformat()
-    batches = [tickers[i: i + DOWNLOAD_BATCH_INTRADAY]
-               for i in range(0, len(tickers), DOWNLOAD_BATCH_INTRADAY)]
-    n_batches = len(batches)
-    _done = [0]
 
-    def _fetch_today_batch(args):
-        b_num, batch = args
-        try:
-            raw = yf.download(
-                batch, period="1d", interval="15m",
-                auto_adjust=True, progress=False,
-                group_by="ticker", threads=True,
-            )
-            result: Dict[str, pd.DataFrame] = {}
-            if raw is None or raw.empty:
-                return result
-            for ticker in batch:
-                try:
-                    # Direct extraction — _normalize_df requires ≥30 rows; period='1d'
-                    # gives ~25 15-min bars for a full NSE session, so bypass it.
-                    if isinstance(raw.columns, pd.MultiIndex):
-                        lvl0 = raw.columns.get_level_values(0).unique().tolist()
-                        lvl1 = (raw.columns.get_level_values(1).unique().tolist()
-                                if raw.columns.nlevels > 1 else [])
-                        if ticker in lvl0:
-                            df_15 = raw[ticker].copy()
-                        elif ticker in lvl1:
-                            df_15 = raw.xs(ticker, axis=1, level=1).copy()
-                        else:
-                            continue
-                        if isinstance(df_15.columns, pd.MultiIndex):
-                            df_15.columns = df_15.columns.get_level_values(-1)
-                    else:
-                        df_15 = raw.copy()
-
-                    want = ["Open", "High", "Low", "Close", "Volume"]
-                    df_15 = df_15[[c for c in want if c in df_15.columns]].dropna(subset=["Close"])
-                    if df_15.empty:
-                        continue
-
-                    # Resample to bar_min; allow ≥1 bar (history provides the depth)
-                    df_bar = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
-                    if df_bar is not None and not df_bar.empty:
-                        result[ticker] = df_bar
-                except Exception:
-                    continue
-            return result
-        except Exception as e:
-            print(f"[screener] intraday top-up batch {b_num}/{n_batches}: {type(e).__name__}: {e}")
-            return {}
-        finally:
-            _done[0] += 1
-            _SCREEN_PROGRESS["done"] = _done[0]
-
-    print(f"[screener] {exchange} {bar_min}min: top-up today's bars "
-          f"({n_batches} batches × {DOWNLOAD_WORKERS} workers)…")
-    _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches,
-                              "exchange": exchange, "bar_min": bar_min})
-
+    # ── Angel One path (NSE/BSE only) ────────────────────────────────────────
     today_bars: Dict[str, pd.DataFrame] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-        for bd in pool.map(_fetch_today_batch, enumerate(batches, 1)):
-            today_bars.update(bd)
+    yf_tickers = list(tickers)
+
+    if exchange in ("NSE", "BSE"):
+        try:
+            from angel_client import download_nse_ohlcv, is_available
+            if is_available():
+                print(f"[screener] {exchange} {bar_min}min: top-up via Angel One (today-only, 12 workers)…")
+                _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": len(tickers),
+                                         "exchange": exchange, "bar_min": bar_min})
+                angel_15m = download_nse_ohlcv(tickers, intraday=True, today_only=True, max_workers=12)
+                if angel_15m:
+                    for ticker, df_15 in angel_15m.items():
+                        df_bar = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
+                        if df_bar is not None and not df_bar.empty:
+                            today_bars[ticker] = df_bar
+                    covered = set(today_bars.keys())
+                    yf_tickers = [t for t in tickers if t not in covered]
+                    print(f"[screener] {exchange} {bar_min}min: Angel One top-up got "
+                          f"{len(covered)}/{len(tickers)}; {len(yf_tickers)} to yfinance fallback")
+                else:
+                    print(f"[screener] {exchange}: Angel One top-up returned empty — falling back to yfinance")
+            else:
+                print(f"[screener] {exchange}: Angel One unavailable — using yfinance for top-up")
+        except Exception as e:
+            print(f"[screener] Angel One top-up error ({type(e).__name__}: {e}); using yfinance")
+
+    # ── yfinance for remaining tickers (or all tickers if not NSE/BSE) ───────
+    if yf_tickers:
+        batches = [yf_tickers[i: i + DOWNLOAD_BATCH_INTRADAY]
+                   for i in range(0, len(yf_tickers), DOWNLOAD_BATCH_INTRADAY)]
+        n_batches = len(batches)
+        _done = [0]
+
+        def _fetch_today_batch(args):
+            b_num, batch = args
+            try:
+                raw = yf.download(
+                    batch, period="1d", interval="15m",
+                    auto_adjust=True, progress=False,
+                    group_by="ticker", threads=True,
+                )
+                result: Dict[str, pd.DataFrame] = {}
+                if raw is None or raw.empty:
+                    return result
+                for ticker in batch:
+                    try:
+                        # Direct extraction — _normalize_df requires ≥30 rows; period='1d'
+                        # gives ~25 15-min bars for a full NSE session, so bypass it.
+                        if isinstance(raw.columns, pd.MultiIndex):
+                            lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                            lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                                    if raw.columns.nlevels > 1 else [])
+                            if ticker in lvl0:
+                                df_15 = raw[ticker].copy()
+                            elif ticker in lvl1:
+                                df_15 = raw.xs(ticker, axis=1, level=1).copy()
+                            else:
+                                continue
+                            if isinstance(df_15.columns, pd.MultiIndex):
+                                df_15.columns = df_15.columns.get_level_values(-1)
+                        else:
+                            df_15 = raw.copy()
+
+                        want = ["Open", "High", "Low", "Close", "Volume"]
+                        df_15 = df_15[[c for c in want if c in df_15.columns]].dropna(subset=["Close"])
+                        if df_15.empty:
+                            continue
+
+                        # Resample to bar_min; allow ≥1 bar (history provides the depth)
+                        df_bar = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
+                        if df_bar is not None and not df_bar.empty:
+                            result[ticker] = df_bar
+                    except Exception:
+                        continue
+                return result
+            except Exception as e:
+                print(f"[screener] intraday top-up batch {b_num}/{n_batches}: {type(e).__name__}: {e}")
+                return {}
+            finally:
+                _done[0] += 1
+                _SCREEN_PROGRESS["done"] = _done[0]
+
+        print(f"[screener] {exchange} {bar_min}min: top-up via yfinance "
+              f"({n_batches} batches × {DOWNLOAD_WORKERS} workers)…")
+        _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches,
+                                  "exchange": exchange, "bar_min": bar_min})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
+            for bd in pool.map(_fetch_today_batch, enumerate(batches, 1)):
+                today_bars.update(bd)
 
     print(f"[screener] {exchange} {bar_min}min: top-up got {len(today_bars)}/{len(tickers)} tickers for today")
 
