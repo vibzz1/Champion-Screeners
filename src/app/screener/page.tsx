@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
 // ── Extracted modules ──────────────────────────────────────────────────────
 import type { SavedScreener, OHLCV, Result } from "./types";
-import { EXCHANGES, PAGE_SIZES, CHIPS }      from "./constants";
+import { EXCHANGES, PAGE_SIZES, CHIPS, DEFAULTS, SCREENER_LS_KEY } from "./constants";
 import { getScanHistory, saveScanHistory, fmtCap, fmtVol, tvUrl, fmtEarnings, earningsColor } from "./helpers";
 import { InteractiveChart }  from "./InteractiveChart";
 import { Sparkline }         from "./Sparkline";
@@ -11,25 +11,16 @@ import { FormulaEditor }     from "./FormulaEditor";
 import { ScanProgress }      from "./ScanProgress";
 
 const API     = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const LS_KEY  = "mio_screeners_v6";
+const LS_KEY = SCREENER_LS_KEY;
+
+function emit(type: string, detail: object = {}) {
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent(type, { detail }));
+}
 
 const CAP_COLORS: Record<string, string> = {
   Mega: "#7c3aed", Large: "#1d4ed8", Mid: "#0f766e", Small: "#92400e",
 };
-
-// ── Default screeners ──────────────────────────────────────────────────────
-const DEFAULTS: SavedScreener[] = [
-  { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 50 and advol(50) > 50 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d2", name: "NPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_dn 1" },
-  { id: "d3", name: "PPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (price > sma(100) or price > sma(200)) and (pgo(50) < 4 or pgo(20) < 4) and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_up 1" },
-  { id: "d4", name: "US Setup Scan",        exchange: "SP500", formula: "advol(20) > 200 and advol(50) > 200 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d5", name: "India Setup Scan 75m", exchange: "NSE",   interval: "75min", formula: "advol(20) > 30 and advol(50) > 30 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d6", name: "US Setup Scan 78m",    exchange: "SP500", interval: "78min", formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d7", name: "Japan Setup Scan",     exchange: "TSE",   formula: "advol(20) > 1000 and advol(50) > 1000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d8", name: "Korea Setup Scan (KOSPI)",  exchange: "KOSPI",  formula: "advol(20) > 5000 and advol(50) > 5000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d10", name: "Korea Setup Scan (KOSDAQ)", exchange: "KOSDAQ", formula: "advol(20) > 2000 and advol(50) > 2000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-  { id: "d9", name: "Germany Setup Scan",    exchange: "XETRA",  formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
-];
 
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function ScreenerPage() {
@@ -64,7 +55,6 @@ export default function ScreenerPage() {
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
-  const [sidebarOpen, setSBO]        = useState(true);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
@@ -112,12 +102,14 @@ export default function ScreenerPage() {
     const exists = screeners.find(x => x.id === s.id);
     persist(exists ? screeners.map(x => x.id===s.id ? s : x) : [...screeners, s]);
     setEditing(null);
+    emit("mio:screeners-changed");
   }
 
   function deleteScreener(id: string) {
     if (!confirm("Delete this screen?")) return;
     persist(screeners.filter(x => x.id !== id));
     if (active?.id === id) { setActive(null); setResults([]); }
+    emit("mio:screeners-changed");
   }
 
   // ── Run ──────────────────────────────────────────────────────────────────
@@ -148,6 +140,7 @@ export default function ScreenerPage() {
       setResults(data.results ?? []);
       setIsLive(data.live ?? false);
       setLastRefreshed(new Date());
+      emit("mio:scan-active", { id: s.id });
       if (data.warning) setWarning(data.warning);
       // ── Scan history: only for live scans (not historical as_of_date) ──────
       if (!histDate) {
@@ -179,6 +172,34 @@ export default function ScreenerPage() {
     saveScreener(s);
     runScreen(s, asOfDate);
   }
+
+  // ── Sidebar event bridge ──────────────────────────────────────────────────
+  useEffect(() => {
+    function onRun(e: Event) {
+      const { screener } = (e as CustomEvent<{ screener: SavedScreener }>).detail;
+      runScreen(screener, asOfDate);
+    }
+    function onNew()  { setEditing("new"); }
+    function onEdit(e: Event) {
+      const { screener } = (e as CustomEvent<{ screener: SavedScreener }>).detail;
+      setEditing(screener);
+    }
+    function onDelete(e: Event) {
+      const { id } = (e as CustomEvent<{ id: string }>).detail;
+      deleteScreener(id);
+    }
+    window.addEventListener("mio:run",    onRun);
+    window.addEventListener("mio:new",    onNew);
+    window.addEventListener("mio:edit",   onEdit);
+    window.addEventListener("mio:delete", onDelete);
+    return () => {
+      window.removeEventListener("mio:run",    onRun);
+      window.removeEventListener("mio:new",    onNew);
+      window.removeEventListener("mio:edit",   onEdit);
+      window.removeEventListener("mio:delete", onDelete);
+    };
+  }, [asOfDate, runScreen]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // ── Sort / filter ─────────────────────────────────────────────────────────
   function handleSort(k: string) {
@@ -314,99 +335,43 @@ export default function ScreenerPage() {
   return (
     <div className="flex h-full" style={{minHeight:"calc(100vh - 48px)"}}>
 
-      {/* ── Left panel ──────────────────────────────────────────────────── */}
-      <div className={`${sidebarOpen?"w-56":"w-8"} shrink-0 border-r border-gray-200 bg-[#f8f9fb] flex flex-col transition-all duration-200 relative`}>
-        {/* Collapse toggle */}
-        <button onClick={()=>setSBO(v=>!v)}
-          className="absolute -right-3 top-4 z-20 w-6 h-6 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-gray-400 hover:text-gray-700 text-[10px]">
-          {sidebarOpen?"◀":"▶"}
-        </button>
-        {!sidebarOpen && <div className="flex-1"/>}
-        {sidebarOpen && <><div className="px-3 py-3 border-b border-gray-200 bg-white space-y-2">
-          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">My Stock Screens</div>
+      {/* ── Main area ────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+
+        {/* ── Action bar ──────────────────────────────────────────────────── */}
+        <div className="px-3 py-1.5 border-b border-gray-200 bg-white flex items-center gap-2 text-xs shrink-0">
           <button onClick={()=>setEditing("new")}
-            className="w-full py-1.5 rounded text-white text-xs font-semibold"
+            className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
             style={{backgroundColor:"#003366"}}>
             + New Setup Scan
           </button>
-          <button
-            onClick={()=>setShowFavorites(v=>!v)}
-            className="w-full py-1.5 rounded text-xs font-semibold border flex items-center justify-center gap-1"
+          <button onClick={()=>setShowFavorites(v=>!v)}
+            className="px-3 py-1 rounded text-[11px] font-semibold border flex items-center gap-1"
             style={{
               backgroundColor: showFavorites ? "#fef3c7" : "white",
-              borderColor: showFavorites ? "#f59e0b" : "#d1d5db",
-              color: showFavorites ? "#b45309" : "#374151",
+              borderColor:     showFavorites ? "#f59e0b" : "#d1d5db",
+              color:           showFavorites ? "#b45309" : "#374151",
             }}>
             {showFavorites ? "★" : "☆"} Favorites ({Object.keys(favorites).length})
           </button>
-          {/* Historical date picker */}
-          <div>
-            <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
-              Hist Date {asOfDate && <span className="text-amber-500 normal-case font-normal ml-1">← historical</span>}
-            </label>
-            <div className="flex gap-1">
-              <input
-                type="date"
-                max={new Date().toISOString().slice(0, 10)}
-                value={asOfDate}
-                onChange={e => setAsOfDate(e.target.value)}
-                className="flex-1 border border-gray-300 rounded px-1.5 py-1 text-[11px] bg-white text-gray-700"
-              />
-              {asOfDate && (
-                <button
-                  onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
-                  className="px-1.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap"
-                  title="Switch to live/today data">
-                  Today
-                </button>
-              )}
-            </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
+            <input
+              type="date"
+              max={new Date().toISOString().slice(0, 10)}
+              value={asOfDate}
+              onChange={e => setAsOfDate(e.target.value)}
+              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400"
+            />
+            {asOfDate && (
+              <button
+                onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
+                className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap">
+                Today
+              </button>
+            )}
           </div>
         </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {screeners.length===0 && (
-            <div className="text-center text-xs text-gray-400 mt-8 px-3">No screens yet.</div>
-          )}
-          {screeners.map(s => {
-            const isActive = active?.id===s.id && !showEditor;
-            return (
-              <div key={s.id}
-                className="border-b border-gray-100 transition-all duration-150"
-                style={{
-                  backgroundColor: isActive?"#eef2ff": "transparent",
-                  borderLeft: isActive?"3px solid #003366":"3px solid transparent",
-                }}>
-                <div className="flex items-center gap-1 px-2 pt-2">
-                  <button onClick={()=>s.formula.trim() ? runScreen(s, asOfDate) : setEditing(s)} className="flex-1 text-left min-w-0">
-                    <div className="text-xs font-semibold truncate flex items-center gap-1" style={{color: isActive?"#003366":"#1a1a2e"}}>
-                      {isActive && <span className="text-[8px]">▶</span>}{s.name}
-                      {!s.formula.trim() && <span className="text-[9px] text-amber-500 font-normal">set formula</span>}
-                    </div>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="text-[9px] font-semibold px-1 py-0 rounded"
-                        style={{backgroundColor: isActive?"#c7d2fe":"#e5e7eb", color: isActive?"#3730a3":"#6b7280"}}>
-                        {s.exchange}
-                      </span>
-                      {s.interval && s.interval !== "1d" && (
-                        <span className="text-[9px] font-semibold px-1 py-0 rounded bg-purple-100 text-purple-600">
-                          {s.interval}
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                  <button onClick={()=>setEditing(s)} className="text-gray-400 hover:text-blue-600 text-xs px-1 shrink-0" title="Edit">✎</button>
-                  <button onClick={()=>deleteScreener(s.id)} className="text-gray-400 hover:text-red-500 text-xs px-1 shrink-0" title="Delete">✕</button>
-                </div>
-                <div className="px-2 pb-2 text-[10px] text-gray-400 font-mono truncate">{s.formula}</div>
-              </div>
-            );
-          })}
-        </div></>}
-      </div>
-
-      {/* ── Main area ────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* Formula editor */}
         {showEditor && (
