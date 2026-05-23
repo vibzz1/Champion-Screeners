@@ -27,6 +27,16 @@ _PIN         = os.environ.get("ANGEL_PIN",          "1235")
 _TOTP_SECRET = os.environ.get("ANGEL_TOTP_SECRET",  "ANOTHBL5HZBJ7YBP6C2SFWEL3U")
 _API_KEY     = os.environ.get("ANGEL_API_KEY",      "AgqDUsEv")
 
+# Log at import time so Railway startup logs immediately show credential source.
+# "env" = real production secret; "default" = fallback dev value (may not auth).
+print(
+    "[angel] Credential source: "
+    f"CLIENT_ID={'env' if os.environ.get('ANGEL_CLIENT_ID') else 'default'}  "
+    f"PIN={'env' if os.environ.get('ANGEL_PIN') else 'default'}  "
+    f"TOTP={'env' if os.environ.get('ANGEL_TOTP_SECRET') else 'default'}  "
+    f"API_KEY={'env' if os.environ.get('ANGEL_API_KEY') else 'default'}"
+)
+
 _BASE_URL    = "https://apiconnect.angelone.in"
 _MASTER_URL  = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 

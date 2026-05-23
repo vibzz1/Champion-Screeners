@@ -10,7 +10,7 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -66,6 +66,39 @@ async def startup_event():
 @app.get("/api/screener/progress")
 def screener_progress():
     return dict(_SCREEN_PROGRESS)
+
+@app.get("/api/angel/status")
+def angel_status():
+    """Diagnostic endpoint — shows Angel One credential source, token validity,
+    instrument map size, and the last intraday top-up result.
+    Hit this URL after a morning scan to confirm Angel One is being used."""
+    import os
+    try:
+        from angel_client import is_available, _get_instrument_map
+        token_ok  = is_available()
+        inst_size = len(_get_instrument_map()) if token_ok else 0
+    except Exception as e:
+        token_ok  = False
+        inst_size = 0
+
+    creds_from_env = all([
+        os.environ.get("ANGEL_CLIENT_ID"),
+        os.environ.get("ANGEL_PIN"),
+        os.environ.get("ANGEL_TOTP_SECRET"),
+        os.environ.get("ANGEL_API_KEY"),
+    ])
+
+    return {
+        "credentials_from_env": creds_from_env,
+        "token_valid":          token_ok,
+        "instrument_map_size":  inst_size,
+        "last_topup":           dict(_LAST_TOPUP) or None,
+        "verdict": (
+            "✅ Angel One active"          if token_ok and _LAST_TOPUP.get("source") in ("angel_one","mixed") else
+            "⚠ Angel One token OK but last topup used yfinance" if token_ok else
+            "❌ Angel One unavailable — all intraday data from yfinance"
+        ),
+    }
 
 @app.get("/api/cache/status")
 def cache_status():

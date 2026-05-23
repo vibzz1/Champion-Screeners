@@ -986,6 +986,9 @@ _SCREEN_PROGRESS: dict = {
     "bar_min":  0,        # 0 for daily, 75/78 for intraday
 }
 
+# Tracks the last intraday top-up result — readable via /api/angel/status
+_LAST_TOPUP: dict = {}
+
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
 
@@ -1227,7 +1230,24 @@ def _topup_intraday(
             for bd in pool.map(_fetch_today_batch, enumerate(batches, 1)):
                 today_bars.update(bd)
 
-    print(f"[screener] {exchange} {bar_min}min: top-up got {len(today_bars)}/{len(tickers)} tickers for today")
+    # ── Record source breakdown for /api/angel/status ────────────────────────
+    angel_count = len(today_bars) - len([t for t in today_bars if t in (yf_tickers if exchange in ("NSE","BSE") else tickers)])
+    yf_count    = len([t for t in today_bars if t in yf_tickers]) if exchange in ("NSE","BSE") and yf_tickers else (len(today_bars) if exchange not in ("NSE","BSE") else 0)
+    used_angel  = exchange in ("NSE", "BSE") and len(today_bars) > 0 and len(yf_tickers) < len(tickers)
+    _LAST_TOPUP.update({
+        "exchange":     exchange,
+        "bar_min":      bar_min,
+        "timestamp":    datetime.datetime.now().isoformat(timespec="seconds"),
+        "total":        len(tickers),
+        "got_today":    len(today_bars),
+        "source":       ("angel_one" if used_angel and not yf_tickers else
+                         "mixed"     if used_angel and yf_tickers else
+                         "yfinance"),
+        "angel_count":  len(today_bars) - len([t for t in today_bars if t in set(yf_tickers)]) if yf_tickers else (len(today_bars) if used_angel else 0),
+        "yf_count":     len([t for t in today_bars if t in set(yf_tickers)]) if yf_tickers else (0 if used_angel else len(today_bars)),
+    })
+    src_tag = _LAST_TOPUP["source"].upper()
+    print(f"[screener] {exchange} {bar_min}min: top-up got {len(today_bars)}/{len(tickers)} tickers — source: {src_tag}")
 
     # Stitch today's bars onto the end of each ticker's historical 75-min series
     merged: Dict[str, pd.DataFrame] = {}
