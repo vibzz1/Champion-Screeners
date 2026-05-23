@@ -1,6 +1,20 @@
 // ── Misc ───────────────────────────────────────────────────────────────────
 export const uid = () => Math.random().toString(36).slice(2, 9);
 
+// ── Recently used screeners ─────────────────────────────────────────────────
+import type { SavedScreener } from "./types";
+const RECENT_KEY = "mio_recent_v1";
+export function getRecentScreeners(): SavedScreener[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]"); }
+  catch { return []; }
+}
+export function saveRecentScreener(s: SavedScreener) {
+  try {
+    const prev = getRecentScreeners().filter(r => r.id !== s.id);
+    localStorage.setItem(RECENT_KEY, JSON.stringify([s, ...prev].slice(0, 2)));
+  } catch {}
+}
+
 // ── Scan history (localStorage) ────────────────────────────────────────────
 export const HIST_KEY = "mio_scan_hist_v1_"; // + screenerId
 

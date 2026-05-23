@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 // ── Extracted modules ──────────────────────────────────────────────────────
 import type { SavedScreener, OHLCV, Result } from "./types";
 import { EXCHANGES, PAGE_SIZES, CHIPS, DEFAULTS, SCREENER_LS_KEY } from "./constants";
-import { getScanHistory, saveScanHistory, fmtCap, fmtVol, tvUrl, fmtEarnings, earningsColor } from "./helpers";
+import { getScanHistory, saveScanHistory, getRecentScreeners, saveRecentScreener, fmtCap, fmtVol, tvUrl, fmtEarnings, earningsColor } from "./helpers";
 import { InteractiveChart }  from "./InteractiveChart";
 import { Sparkline }         from "./Sparkline";
 import { FormulaEditor }     from "./FormulaEditor";
@@ -55,6 +55,7 @@ export default function ScreenerPage() {
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
+  const [recentScreeners, setRecent] = useState<SavedScreener[]>([]);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
@@ -80,6 +81,8 @@ export default function ScreenerPage() {
       if (raw) setFavorites(JSON.parse(raw));
     } catch {}
   }, []);
+
+  useEffect(() => { setRecent(getRecentScreeners()); }, []);
 
   function toggleFavorite(r: Result) {
     setFavorites(prev => {
@@ -141,6 +144,8 @@ export default function ScreenerPage() {
       setIsLive(data.live ?? false);
       setLastRefreshed(new Date());
       emit("mio:scan-active", { id: s.id });
+      saveRecentScreener(s);
+      setRecent(getRecentScreeners());
       if (data.warning) setWarning(data.warning);
       // ── Scan history: only for live scans (not historical as_of_date) ──────
       if (!histDate) {
@@ -354,6 +359,22 @@ export default function ScreenerPage() {
             }}>
             {showFavorites ? "★" : "☆"} Favorites ({Object.keys(favorites).length})
           </button>
+
+          {/* Recent scanners */}
+          {recentScreeners.length > 0 && (
+            <>
+              <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"/>
+              <span className="text-[10px] text-gray-400 shrink-0">Recent:</span>
+              {recentScreeners.map(s => (
+                <button key={s.id} onClick={() => runScreen(s, asOfDate)}
+                  title={s.formula}
+                  className="px-2.5 py-1 rounded border border-gray-200 text-[11px] text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors max-w-[130px] truncate flex items-center gap-1 shrink-0">
+                  <span className="text-gray-400 text-[10px]">↺</span>{s.name}
+                </button>
+              ))}
+            </>
+          )}
+
           <div className="ml-auto flex items-center gap-1.5">
             {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
             <input
