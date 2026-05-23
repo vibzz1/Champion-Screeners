@@ -5,6 +5,21 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "XETRA"];
 const PAGE_SIZES = [20, 50, 100];
 const LS_KEY = "mio_screeners_v6";
+const HIST_KEY = "mio_scan_hist_v1_"; // + screenerId
+
+// ── Scan history helpers (localStorage, outside React) ─────────────────────
+function getScanHistory(screenerId: string): Record<string, string[]> {
+  try { return JSON.parse(localStorage.getItem(HIST_KEY + screenerId) ?? "{}"); }
+  catch { return {}; }
+}
+function saveScanHistory(screenerId: string, date: string, tickers: string[]) {
+  const hist = getScanHistory(screenerId);
+  hist[date] = tickers;
+  // Keep 7 most recent dates
+  const pruned: Record<string, string[]> = {};
+  Object.keys(hist).sort().slice(-7).forEach(k => { pruned[k] = hist[k]; });
+  try { localStorage.setItem(HIST_KEY + screenerId, JSON.stringify(pruned)); } catch {}
+}
 
 const CAP_COLORS: Record<string, string> = {
   Mega: "#7c3aed", Large: "#1d4ed8", Mid: "#0f766e", Small: "#92400e",
@@ -570,6 +585,9 @@ export default function ScreenerPage() {
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [tick, setTick]                   = useState(0); // increments every 60s for staleness re-render
+  const [prevTickerSet, setPrevTS]        = useState<Set<string> | null>(null); // null = no history yet
+  const [scanDiff, setScanDiff]           = useState<{prevCount:number;newCount:number;droppedCount:number;prevDate:string}|null>(null);
   const [jumpToTicker, setJumpToTicker]   = useState<string | null>(null);
   const [scanProgress, setScanProgress]   = useState<{phase:string;done:number;total:number;exchange:string;bar_min:number}|null>(null);
   const scanStartRef = useRef<number>(0);
@@ -647,6 +665,8 @@ export default function ScreenerPage() {
     setPage(1);
     setSF("All");
     setCF("All");
+    setPrevTS(null);
+    setScanDiff(null);
     try {
       const res = await fetch(`${API}/api/screener/run`, {
         method: "POST",
@@ -659,6 +679,25 @@ export default function ScreenerPage() {
       setIsLive(data.live ?? false);
       setLastRefreshed(new Date());
       if (data.warning) setWarning(data.warning);
+      // ── Scan history: only for live scans (not historical as_of_date) ──────
+      if (!histDate) {
+        const today = new Date().toISOString().slice(0, 10);
+        const todayTickers: string[] = (data.results ?? []).map((r: Result) => r.ticker);
+        const hist = getScanHistory(s.id);
+        const prevDate = Object.keys(hist).filter(k => k < today).sort().pop();
+        const prevSet = prevDate ? new Set<string>(hist[prevDate]) : null;
+        setPrevTS(prevSet);
+        if (prevSet && todayTickers.length > 0) {
+          const currSet = new Set(todayTickers);
+          setScanDiff({
+            prevCount:    prevSet.size,
+            newCount:     todayTickers.filter(t => !prevSet.has(t)).length,
+            droppedCount: [...prevSet].filter(t => !currSet.has(t)).length,
+            prevDate: prevDate!,
+          });
+        }
+        saveScanHistory(s.id, today, todayTickers);
+      }
     } catch(e) {
       setError(`Backend error: ${e}`);
     } finally {
@@ -740,6 +779,12 @@ export default function ScreenerPage() {
     }, 80);
     return () => clearTimeout(t);
   }, [jumpToTicker, view]);
+
+  // Tick every 60s so staleness badge re-computes without a full re-fetch
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
@@ -1040,7 +1085,22 @@ export default function ScreenerPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"/>LIVE
                       </span>
                     )}
-                    {!loading && results.length>0 && <><span className="text-gray-300">·</span><span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>{lastRefreshed&&<><span className="text-gray-300">·</span><span className="text-gray-400 text-[10px]">as of {lastRefreshed.toTimeString().slice(0,5)}</span></>}</>}
+                    {!loading && results.length>0 && (()=>{
+                      const minAgo = lastRefreshed ? Math.floor((Date.now()-lastRefreshed.getTime())/60_000) : null;
+                      const stale  = minAgo !== null && minAgo >= 30;
+                      void tick; // subscribe to 60s re-render
+                      return <>
+                        <span className="text-gray-300">·</span>
+                        <span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
+                        {lastRefreshed && <>
+                          <span className="text-gray-300">·</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stale?"bg-amber-100 text-amber-700":"bg-gray-100 text-gray-500"}`}
+                            title={stale?"Data may be stale — re-run to refresh":undefined}>
+                            {stale?"⚠ ":""}Data as of {lastRefreshed.toTimeString().slice(0,5)}{minAgo&&minAgo>0?` · ${minAgo}m ago`:""}
+                          </span>
+                        </>}
+                      </>;
+                    })()}
                   </>
                 ) : (
                   <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
@@ -1132,6 +1192,23 @@ export default function ScreenerPage() {
               )}
             </div>
 
+            {/* ── Scan diff banner ────────────────────────────────────────── */}
+            {!loading && scanDiff && results.length > 0 && (
+              <div className="px-3 py-1 flex items-center gap-2 text-[11px] border-b border-gray-100 bg-gray-50">
+                <span className="text-gray-400">vs {scanDiff.prevDate}:</span>
+                <span className="font-semibold text-gray-600">{scanDiff.prevCount} → {scanDiff.newCount+scanDiff.prevCount-scanDiff.droppedCount} results</span>
+                {scanDiff.newCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">↑{scanDiff.newCount} new</span>
+                )}
+                {scanDiff.droppedCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-500 font-semibold">↓{scanDiff.droppedCount} dropped</span>
+                )}
+                {scanDiff.newCount === 0 && scanDiff.droppedCount === 0 && (
+                  <span className="text-gray-400">same as yesterday</span>
+                )}
+              </div>
+            )}
+
             {/* Loading — real progress */}
             {loading && <ScanProgress progress={scanProgress} startMs={scanStartRef.current} exchange={active?.exchange??""} />}
 
@@ -1176,6 +1253,8 @@ export default function ScreenerPage() {
                       const up=(r.change_pct??0)>=0;
                       const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
+                      const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
+                      const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                       return <tr key={r.ticker} className={`${volSurge?"bg-orange-50 hover:bg-orange-100":"hover:bg-blue-50"} border-b border-gray-100`}>
                         <td className="border border-gray-200 px-1 py-1 text-center">
                           <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
@@ -1194,6 +1273,8 @@ export default function ScreenerPage() {
                             {r.symbol}
                           </button>
                           {r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
+                          {isNew   &&<span className="ml-1 text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
+                          {isRepeat&&<span className="ml-1 text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
                         </td>
                         <td className="border border-gray-200 px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
                         <td className="border border-gray-200 px-2 py-1">
@@ -1251,6 +1332,8 @@ export default function ScreenerPage() {
                   {paged.map(r=>{
                     const up=(r.change_pct??0)>=0;
                     const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                    const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
+                    const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                     return (
                       <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "#003366" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
                         {chartCols===1 ? (
@@ -1264,6 +1347,8 @@ export default function ScreenerPage() {
                               </button>
                               <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
+                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
                               <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -1303,6 +1388,8 @@ export default function ScreenerPage() {
                               </button>
                               <span className="font-bold text-sm" style={{color:"#003399"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
+                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
                               <span className="rounded px-1 py-0.5 text-[9px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span>
                               <div className="flex-1 min-w-0 mx-1">
                                 <span className="text-xs text-gray-600 font-medium truncate block">{r.name}</span>
