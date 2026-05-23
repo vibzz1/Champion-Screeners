@@ -26,7 +26,7 @@ interface OHLCV {
 interface Result {
   symbol: string; ticker: string; name: string; sector: string; industry: string;
   cap_size: string; market_cap: number | null;
-  price: number; change_pct: number; volume: number;
+  price: number; change_pct: number; volume: number; avg_vol_20?: number;
   sma20: number | null; sma50: number | null; sma200: number | null;
   rsi: number | null; macd_bullish: boolean;
   high_52w: number | null; pct_from_52w_high: number | null; new_52w_high: boolean;
@@ -298,6 +298,28 @@ function fmtCap(cap: number|null, exchange: string) {
   if(cap>=1000000) return `$${(cap/1000000).toFixed(1)}T`; if(cap>=1000) return `$${(cap/1000).toFixed(0)}B`; return `$${cap}M`;
 }
 function fmtVol(v: number) { return v>=1_000_000?`${(v/1_000_000).toFixed(1)}M`:v>=1000?`${(v/1000).toFixed(0)}K`:`${v}`; }
+
+// ── TradingView URL helper ─────────────────────────────────────────────────
+function tvUrl(ticker: string, exchange?: string): string {
+  // Auto-detect exchange from ticker suffix if not supplied (e.g. for favorites)
+  const ex = exchange || (
+    ticker.endsWith(".NS") ? "NSE"    :
+    ticker.endsWith(".BO") ? "BSE"    :
+    ticker.endsWith(".T")  ? "TSE"    :
+    ticker.endsWith(".KS") ? "KOSPI"  :
+    ticker.endsWith(".KQ") ? "KOSDAQ" :
+    ticker.endsWith(".DE") ? "XETRA"  : ""
+  );
+  let sym: string;
+  if      (ex === "NSE")    sym = `NSE:${ticker.replace(".NS","").replace(".BO","")}`;
+  else if (ex === "BSE")    sym = `BSE:${ticker.replace(".BO","").replace(".NS","")}`;
+  else if (ex === "TSE")    sym = `TSE:${ticker.replace(".T","")}`;
+  else if (ex === "KOSPI")  sym = `KRX:${ticker.replace(".KS","")}`;
+  else if (ex === "KOSDAQ") sym = `KOSDAQ:${ticker.replace(".KQ","")}`;
+  else if (ex === "XETRA")  sym = `XETR:${ticker.replace(".DE","")}`;
+  else sym = ticker.replace(/\.(NS|BO|T|KS|KQ|DE)$/,""); // US: no prefix
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`;
+}
 
 function fmtEarnings(dateStr: string): string {
   if(!dateStr) return "—";
@@ -920,7 +942,8 @@ export default function ScreenerPage() {
                     {favPaged.map((r,idx)=>{
                       const up=(r.change_pct??0)>=0;
                       const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
-                      return <tr key={r.ticker} className="hover:bg-amber-50 border-b border-gray-100">
+                      const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
+                      return <tr key={r.ticker} className={`${volSurge?"bg-orange-50 hover:bg-orange-100":"hover:bg-amber-50"} border-b border-gray-100`}>
                         <td className="border border-gray-200 px-1 py-1 text-center">
                           <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
                             className="text-base leading-none" style={{color:"#f59e0b"}}>★</button>
@@ -934,7 +957,9 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1"><span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{backgroundColor:CAP_COLORS[r.cap_size]??"#555"}}>{r.cap_size}</span></td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums">{r.price?.toLocaleString()}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
-                        <td className="border border-gray-200 px-2 py-1 tabular-nums text-gray-600">{fmtVol(r.volume)}</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
+                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
+                        </td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
@@ -977,6 +1002,9 @@ export default function ScreenerPage() {
                           <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
                           <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
                           {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
+                          <a href={tvUrl(r.ticker)} target="_blank" rel="noopener noreferrer"
+                            className="ml-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap self-center"
+                            title="Open on TradingView">TV ↗</a>
                         </div>
                       </div>
                       <InteractiveChart data={r.ohlcv} masterBars={masterZoom} />
@@ -1126,7 +1154,7 @@ export default function ScreenerPage() {
                       <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
                       <TH label="Symbol" k="symbol"/>
                       <TH label="Company" k="name"/>
-                      <th className="border border-gray-200 px-2 py-1">Sector</th>
+                      <TH label="Sector" k="sector"/>
                       <TH label="Industry" k="industry"/>
                       <TH label="Cap" k="cap_size"/>
                       <TH label="Mkt Cap" k="market_cap"/>
@@ -1147,7 +1175,8 @@ export default function ScreenerPage() {
                     {paged.map((r,idx)=>{
                       const up=(r.change_pct??0)>=0;
                       const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
-                      return <tr key={r.ticker} className="hover:bg-blue-50 border-b border-gray-100">
+                      const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
+                      return <tr key={r.ticker} className={`${volSurge?"bg-orange-50 hover:bg-orange-100":"hover:bg-blue-50"} border-b border-gray-100`}>
                         <td className="border border-gray-200 px-1 py-1 text-center">
                           <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
                             className="text-base leading-none transition-colors"
@@ -1177,7 +1206,9 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums">{r.price?.toLocaleString()}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
                         <td className="border border-gray-200 px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")||"—"}</td>
-                        <td className="border border-gray-200 px-2 py-1 tabular-nums text-gray-600">{fmtVol(r.volume)}</td>
+                        <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
+                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
+                        </td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
@@ -1256,6 +1287,9 @@ export default function ScreenerPage() {
                               <div className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></div>
                               <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
                               {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
+                              <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
+                                className="ml-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap self-center"
+                                title="Open on TradingView">TV ↗</a>
                             </div>
                           </div>
                         ) : (
@@ -1284,6 +1318,9 @@ export default function ScreenerPage() {
                               <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
                               <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
                               {earnings[r.ticker] && <span style={{color:earningsColor(earnings[r.ticker]),fontWeight:600}}>E:{fmtEarnings(earnings[r.ticker])}</span>}
+                              <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
+                                className="text-[10px] px-1 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
+                                title="Open on TradingView">TV ↗</a>
                             </div>
                           </div>
                         )}
