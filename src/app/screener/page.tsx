@@ -276,10 +276,10 @@ export default function ScreenerPage() {
   function TH({label,k}:{label:string;k:string}) {
     const on=sortKey===k;
     return <th onClick={()=>handleSort(k)}
-      className="border border-gray-200 px-2 py-1 cursor-pointer select-none whitespace-nowrap hover:bg-blue-50 text-left"
-      style={{backgroundColor:on?"#e8f0fe":undefined}}>
+      className="border border-gray-200 px-2 py-1.5 cursor-pointer select-none whitespace-nowrap hover:bg-blue-100 text-left font-semibold text-gray-600 text-[11px]"
+      style={{backgroundColor:on?"#dbeafe":undefined}}>
       {label}
-      <span className="ml-0.5" style={{color:on?"#003366":"#ccc",fontSize:"9px"}}>
+      <span className="ml-1" style={{color:on?"#2563eb":"#9ca3af",fontSize:"9px"}}>
         {on?(sortDir==="asc"?"▲":"▼"):"↕"}
       </span>
     </th>;
@@ -372,15 +372,28 @@ export default function ScreenerPage() {
             const isActive = active?.id===s.id && !showEditor;
             return (
               <div key={s.id}
-                className="border-b border-gray-100 transition-colors"
-                style={{backgroundColor: isActive?"#e8f0fe": "transparent"}}>
+                className="border-b border-gray-100 transition-all duration-150"
+                style={{
+                  backgroundColor: isActive?"#eef2ff": "transparent",
+                  borderLeft: isActive?"3px solid #003366":"3px solid transparent",
+                }}>
                 <div className="flex items-center gap-1 px-2 pt-2">
                   <button onClick={()=>s.formula.trim() ? runScreen(s, asOfDate) : setEditing(s)} className="flex-1 text-left min-w-0">
-                    <div className="text-xs font-semibold truncate" style={{color: isActive?"#003366":"#1a1a2e"}}>
-                      {isActive && "▶ "}{s.name}
-                      {!s.formula.trim() && <span className="ml-1 text-[9px] text-amber-500 font-normal">set formula</span>}
+                    <div className="text-xs font-semibold truncate flex items-center gap-1" style={{color: isActive?"#003366":"#1a1a2e"}}>
+                      {isActive && <span className="text-[8px]">▶</span>}{s.name}
+                      {!s.formula.trim() && <span className="text-[9px] text-amber-500 font-normal">set formula</span>}
                     </div>
-                    <div className="text-[10px] text-gray-400">{s.exchange}</div>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-[9px] font-semibold px-1 py-0 rounded"
+                        style={{backgroundColor: isActive?"#c7d2fe":"#e5e7eb", color: isActive?"#3730a3":"#6b7280"}}>
+                        {s.exchange}
+                      </span>
+                      {s.interval && s.interval !== "1d" && (
+                        <span className="text-[9px] font-semibold px-1 py-0 rounded bg-purple-100 text-purple-600">
+                          {s.interval}
+                        </span>
+                      )}
+                    </div>
                   </button>
                   <button onClick={()=>setEditing(s)} className="text-gray-400 hover:text-blue-600 text-xs px-1 shrink-0" title="Edit">✎</button>
                   <button onClick={()=>deleteScreener(s.id)} className="text-gray-400 hover:text-red-500 text-xs px-1 shrink-0" title="Delete">✕</button>
@@ -434,23 +447,23 @@ export default function ScreenerPage() {
               <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
                 <table className="text-xs border-collapse w-full">
                   <thead>
-                    <tr className="bg-gray-50 sticky top-0 z-10">
-                      <th className="border border-gray-200 px-1 py-1 w-6 text-center text-gray-400">★</th>
-                      <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
-                      <th className="border border-gray-200 px-2 py-1 text-left">Symbol</th>
-                      <th className="border border-gray-200 px-2 py-1">Company</th>
-                      <th className="border border-gray-200 px-2 py-1">Sector</th>
-                      <th className="border border-gray-200 px-2 py-1">Cap</th>
-                      <th className="border border-gray-200 px-2 py-1">Price</th>
-                      <th className="border border-gray-200 px-2 py-1">Chg %</th>
-                      <th className="border border-gray-200 px-2 py-1">Volume</th>
-                      <th className="border border-gray-200 px-2 py-1">RSI</th>
-                      <th className="border border-gray-200 px-2 py-1">MACD</th>
-                      <th className="border border-gray-200 px-2 py-1">SMA20</th>
-                      <th className="border border-gray-200 px-2 py-1">SMA50</th>
-                      <th className="border border-gray-200 px-2 py-1">% 52H</th>
-                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
-                      <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
+                    <tr className="bg-gray-100 sticky top-0 z-10">
+                      <th className="border border-gray-200 px-1 py-1.5 w-6 text-center text-gray-500 font-semibold text-[11px]">★</th>
+                      <th className="border border-gray-200 px-2 py-1.5 text-gray-500 font-semibold text-[11px] w-7">#</th>
+                      <th className="border border-gray-200 px-2 py-1.5 text-left font-semibold text-gray-600 text-[11px]">Symbol</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Company</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Sector</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Cap</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Price</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Chg %</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">Volume</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">RSI</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">MACD</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">SMA20</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">SMA50</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px]">% 52H</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px] whitespace-nowrap">Earnings</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px] text-center">Chart</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -475,8 +488,19 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
                           {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
                         </td>
-                        <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
-                        <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          {r.rsi!=null
+                            ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
+                                style={{color:rc,backgroundColor:r.rsi>70?"#fee2e2":r.rsi<30?"#dcfce7":"#f3f4f6"}}>
+                                {r.rsi}
+                              </span>
+                            : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${r.macd_bullish?"bg-green-100 text-green-700":"bg-red-100 text-red-600"}`}>
+                            {r.macd_bullish?"▲ Bull":"▼ Bear"}
+                          </span>
+                        </td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
@@ -696,9 +720,9 @@ export default function ScreenerPage() {
               <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
                 <table className="text-xs border-collapse w-full">
                   <thead>
-                    <tr className="bg-gray-50 sticky top-0 z-10">
-                      <th className="border border-gray-200 px-1 py-1 w-6 text-center text-gray-400">★</th>
-                      <th className="border border-gray-200 px-2 py-1 text-gray-400 w-7">#</th>
+                    <tr className="bg-gray-100 sticky top-0 z-10">
+                      <th className="border border-gray-200 px-1 py-1.5 w-6 text-center text-gray-500 font-semibold text-[11px]">★</th>
+                      <th className="border border-gray-200 px-2 py-1.5 text-gray-500 font-semibold text-[11px] w-7">#</th>
                       <TH label="Symbol" k="symbol"/>
                       <TH label="Company" k="name"/>
                       <TH label="Sector" k="sector"/>
@@ -707,7 +731,7 @@ export default function ScreenerPage() {
                       <TH label="Mkt Cap" k="market_cap"/>
                       <TH label="Price" k="price"/>
                       <TH label="Chg %" k="change_pct"/>
-                      <th className="border border-gray-200 px-2 py-1 whitespace-nowrap">Earnings</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px] whitespace-nowrap">Earnings</th>
                       <TH label="Volume" k="volume"/>
                       <TH label="RSI" k="rsi"/>
                       <TH label="MACD" k="macd_bullish"/>
@@ -715,7 +739,7 @@ export default function ScreenerPage() {
                       <TH label="SMA50" k="sma50"/>
                       <TH label="SMA200" k="sma200"/>
                       <TH label="% 52H" k="pct_from_52w_high"/>
-                      <th className="border border-gray-200 px-2 py-1 text-center">Chart</th>
+                      <th className="border border-gray-200 px-2 py-1.5 font-semibold text-gray-600 text-[11px] text-center">Chart</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -760,8 +784,19 @@ export default function ScreenerPage() {
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
                           {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
                         </td>
-                        <td className="border border-gray-200 px-2 py-1 font-semibold tabular-nums" style={{color:rc}}>{r.rsi??"—"}</td>
-                        <td className="border border-gray-200 px-2 py-1 font-semibold" style={{color:r.macd_bullish?"#16a34a":"#dc2626"}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          {r.rsi!=null
+                            ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
+                                style={{color:rc,backgroundColor:r.rsi>70?"#fee2e2":r.rsi<30?"#dcfce7":"#f3f4f6"}}>
+                                {r.rsi}
+                              </span>
+                            : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${r.macd_bullish?"bg-green-100 text-green-700":"bg-red-100 text-red-600"}`}>
+                            {r.macd_bullish?"▲ Bull":"▼ Bear"}
+                          </span>
+                        </td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
                         <td className="border border-gray-200 px-2 py-1 tabular-nums" style={{color:r.sma200!=null&&r.price>r.sma200?"#16a34a":"#dc2626"}}>{r.sma200??"—"}</td>
