@@ -3,17 +3,21 @@ import Link from "next/link";
 
 export default function Header() {
   return (
-    <div className="flex items-center justify-between px-3 py-2 border-b border-gray-300 bg-white">
-      <Link href="/" className="flex items-center gap-1">
-        <span className="text-2xl font-bold" style={{ color: "#003366" }}>
-          Market In
-          <span style={{ color: "#cc6600" }}>O</span>
-          ut
+    <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5" style={{ backgroundColor: "#0f172a" }}>
+      <Link href="/" className="flex items-center gap-2.5">
+        <span className="text-xl font-bold tracking-tight text-white">
+          Market In<span style={{ color: "#f59e0b" }}>O</span>ut
         </span>
-        <span className="text-xs tracking-widest text-gray-500 ml-1 mt-1">STOCK SCREENER</span>
+        <span className="text-[10px] tracking-widest font-medium" style={{ color: "#475569" }}>
+          STOCK SCREENER
+        </span>
       </Link>
-      <div className="text-xs text-gray-600">
-        <Link href="/account" className="text-blue-700 hover:underline">My Account</Link>
+      <div className="text-xs">
+        <Link href="/account" className="transition-colors" style={{ color: "#64748b" }}
+          onMouseEnter={e => (e.currentTarget.style.color = "#e2e8f0")}
+          onMouseLeave={e => (e.currentTarget.style.color = "#64748b")}>
+          My Account
+        </Link>
       </div>
     </div>
   );

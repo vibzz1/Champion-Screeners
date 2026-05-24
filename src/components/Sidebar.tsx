@@ -22,14 +22,25 @@ const OTHER_NAV = [
   { label: "Portfolio Tracker",   href: "/portfolio"   },
 ];
 
+// Design tokens
+const BG       = "#0f172a";   // slate-900
+const BG2      = "#1e293b";   // slate-800
+const BORDER   = "rgba(255,255,255,0.07)";
+const TEXT_DIM = "#64748b";   // slate-500
+const TEXT_MED = "#94a3b8";   // slate-400
+const TEXT_LT  = "#e2e8f0";   // slate-200
+const ACTIVE_C = "#60a5fa";   // blue-400
+const ACTIVE_B = "rgba(96,165,250,0.12)";
+const AMBER    = "#f59e0b";
+
 export default function Sidebar() {
   const pathname   = usePathname();
   const onScreener = pathname === "/screener";
 
-  const [collapsed,  setCollapsed]  = useState(false);
-  const [open,       setOpen]       = useState(true);
-  const [screeners,  setScreeners]  = useState<SavedScreener[]>(DEFAULTS);
-  const [activeId,   setActiveId]   = useState<string | null>(null);
+  const [collapsed, setCollapsed]  = useState(false);
+  const [open,      setOpen]       = useState(true);
+  const [screeners, setScreeners]  = useState<SavedScreener[]>(DEFAULTS);
+  const [activeId,  setActiveId]   = useState<string | null>(null);
 
   const refresh = useCallback(() => setScreeners(loadScreeners()), []);
 
@@ -66,72 +77,84 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="relative shrink-0 border-r border-gray-300 bg-[#f0f4f8] min-h-screen text-xs flex flex-col transition-all duration-200"
-      style={{ fontSize: "12px", width: collapsed ? "2rem" : "11rem" }}
-    >
-      {/* ── Toggle button ─────────────────────────────────────────────────── */}
+      className="relative shrink-0 min-h-screen flex flex-col transition-all duration-200"
+      style={{ width: collapsed ? "2rem" : "11rem", backgroundColor: BG, borderRight: `1px solid ${BORDER}` }}>
+
+      {/* ── Toggle button ─────────────────────────────────────────────── */}
       <button
         onClick={() => setCollapsed(v => !v)}
         title={collapsed ? "Show sidebar" : "Hide sidebar"}
-        className="absolute -right-3 top-5 z-30 w-6 h-6 rounded-full bg-white border border-gray-300 shadow-sm flex items-center justify-center text-gray-500 hover:text-gray-800 hover:bg-gray-50 transition-colors text-[10px]">
+        className="absolute -right-3 top-5 z-30 w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center text-[10px] transition-colors hover:bg-gray-50"
+        style={{ color: "#475569", border: "1px solid #e2e8f0" }}>
         {collapsed ? "▶" : "◀"}
       </button>
 
-      {/* ── Full sidebar content (hidden when collapsed) ───────────────────── */}
+      {/* ── Full content (hidden when collapsed) ──────────────────────── */}
       {!collapsed && (
         <>
-          {/* Section heading */}
-          <div className="px-2 py-1 font-bold text-white text-[11px]" style={{ backgroundColor: "#003366" }}>
+          {/* Section label */}
+          <div className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase"
+            style={{ color: TEXT_DIM, borderBottom: `1px solid ${BORDER}` }}>
             Analytics Tools
           </div>
 
-          {/* Stock Screener toggle */}
+          {/* ── Stock Screener (collapsible) ─────────────────────────── */}
           <button
             onClick={() => { if (!onScreener) { window.location.href = "/screener"; return; } setOpen(v => !v); }}
-            className="w-full flex items-center justify-between px-2 py-[5px] hover:bg-blue-50 transition-colors text-left border-b border-gray-200"
-            style={{ color: onScreener ? "#cc6600" : "#003399", fontWeight: onScreener ? "bold" : "normal" }}>
+            className="w-full flex items-center justify-between px-3 py-2 text-left text-[12px] transition-colors"
+            style={{
+              color:           onScreener ? AMBER : TEXT_MED,
+              fontWeight:      onScreener ? 600 : 400,
+              borderBottom:    `1px solid ${BORDER}`,
+              backgroundColor: "transparent",
+            }}
+            onMouseEnter={e => { if (!onScreener) e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.04)"; }}
+            onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; }}>
             <span>Stock Screener</span>
-            <span className="text-[9px] text-gray-400 ml-1">{open ? "▾" : "▸"}</span>
+            <span style={{ color: TEXT_DIM, fontSize: "9px" }}>{open ? "▾" : "▸"}</span>
           </button>
 
           {/* Scanner dropdown */}
           {open && (
-            <div className="bg-white border-b border-gray-200 flex flex-col">
-              <button
-                onClick={handleNew}
-                className="w-full text-left px-3 py-1.5 text-[11px] font-semibold border-b border-gray-100 hover:bg-blue-50 transition-colors flex items-center gap-1"
-                style={{ color: "#003366" }}>
+            <div style={{ backgroundColor: BG2, borderBottom: `1px solid ${BORDER}` }}>
+              {/* + New */}
+              <button onClick={handleNew}
+                className="w-full text-left px-3 py-1.5 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                style={{ color: ACTIVE_C, borderBottom: `1px solid ${BORDER}` }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = ACTIVE_B; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; }}>
                 <span className="text-base leading-none font-normal">+</span> New Setup Scan
               </button>
 
-              <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 160px)" }}>
+              {/* List */}
+              <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 180px)" }}>
                 {screeners.map(s => {
                   const isActive = activeId === s.id;
                   return (
                     <div key={s.id}
-                      className="group flex items-center border-b border-gray-100 transition-all duration-100"
+                      className="group flex items-center transition-all duration-100"
                       style={{
-                        backgroundColor: isActive ? "#eef2ff" : "transparent",
-                        borderLeft: isActive ? "3px solid #003366" : "3px solid transparent",
+                        backgroundColor: isActive ? ACTIVE_B : "transparent",
+                        borderLeft:      isActive ? `3px solid ${ACTIVE_C}` : "3px solid transparent",
+                        borderBottom:    `1px solid ${BORDER}`,
                       }}>
-                      <button
-                        onClick={() => handleRun(s)}
-                        className="flex-1 text-left px-2 py-1.5 min-w-0"
-                        title={s.formula}>
+                      <button onClick={() => handleRun(s)}
+                        className="flex-1 text-left px-2 py-1.5 min-w-0" title={s.formula}>
                         <div className="font-semibold truncate text-[11px]"
-                          style={{ color: isActive ? "#003366" : "#1a1a2e" }}>
+                          style={{ color: isActive ? ACTIVE_C : TEXT_LT }}>
                           {s.name}
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[9px] font-semibold px-1 rounded"
                             style={{
-                              backgroundColor: isActive ? "#c7d2fe" : "#e5e7eb",
-                              color:           isActive ? "#3730a3" : "#6b7280",
+                              backgroundColor: isActive ? "rgba(96,165,250,0.2)" : "rgba(255,255,255,0.08)",
+                              color:           isActive ? ACTIVE_C : TEXT_DIM,
                             }}>
                             {s.exchange}
                           </span>
                           {s.interval && s.interval !== "1d" && (
-                            <span className="text-[9px] font-semibold px-1 rounded bg-purple-100 text-purple-600">
+                            <span className="text-[9px] font-semibold px-1 rounded"
+                              style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#c084fc" }}>
                               {s.interval}
                             </span>
                           )}
@@ -139,9 +162,17 @@ export default function Sidebar() {
                       </button>
                       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1 shrink-0 gap-0.5">
                         <button onClick={() => emit("mio:edit", { screener: s })}
-                          className="p-0.5 text-gray-400 hover:text-blue-600 text-xs" title="Edit">✎</button>
+                          className="p-0.5 text-[11px] transition-colors"
+                          style={{ color: TEXT_DIM }}
+                          onMouseEnter={e => { e.currentTarget.style.color = ACTIVE_C; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; }}
+                          title="Edit">✎</button>
                         <button onClick={() => emit("mio:delete", { id: s.id })}
-                          className="p-0.5 text-gray-400 hover:text-red-500 text-xs" title="Delete">✕</button>
+                          className="p-0.5 text-[11px] transition-colors"
+                          style={{ color: TEXT_DIM }}
+                          onMouseEnter={e => { e.currentTarget.style.color = "#f87171"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; }}
+                          title="Delete">✕</button>
                       </div>
                     </div>
                   );
@@ -150,13 +181,19 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Other nav items */}
+          {/* Other nav */}
           {OTHER_NAV.map(item => {
             const active = pathname === item.href;
             return (
               <Link key={item.href} href={item.href}
-                className="block px-2 py-[5px] hover:underline border-b border-gray-200"
-                style={{ color: active ? "#cc6600" : "#003399", fontWeight: active ? "bold" : "normal" }}>
+                className="block px-3 py-2 text-[12px] transition-colors"
+                style={{
+                  color:        active ? AMBER : TEXT_MED,
+                  fontWeight:   active ? 600 : 400,
+                  borderBottom: `1px solid ${BORDER}`,
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.color = TEXT_LT; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.color = TEXT_MED; }}>
                 {item.label}
               </Link>
             );
