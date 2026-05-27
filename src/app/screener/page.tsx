@@ -128,6 +128,7 @@ export default function ScreenerPage() {
     setError("");
     setWarning("");
     setResults([]);
+    setRS("");
     setIsLive(false);
     setPage(1);
     setSF("All");
