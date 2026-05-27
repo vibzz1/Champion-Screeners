@@ -428,7 +428,6 @@ export default function ScreenerPage() {
             {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
             <input
               type="date"
-              max={(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()}
               value={asOfDate}
               onChange={e => setAsOfDate(e.target.value)}
               className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400"
