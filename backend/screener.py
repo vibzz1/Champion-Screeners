@@ -21,6 +21,16 @@ import json
 import re as _re_module
 import concurrent.futures
 import yfinance as yf
+
+# ── Global bounded thread pool ─────────────────────────────────────────────
+# One reusable pool for the entire process lifetime.
+# Threads are created ONCE at startup and reused — no new-thread storms per scan.
+# 8 workers: enough parallelism, well under Railway's OS thread limit even when
+# FastAPI's anyio pool (capped to 10 in main.py) and APScheduler run alongside.
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8,
+    thread_name_prefix="mio_worker",
+)
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -975,7 +985,7 @@ def _normalize_df(raw: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
 # ── OHLCV disk cache ───────────────────────────────────────────────────────
 DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
 DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
-DOWNLOAD_WORKERS        = 3     # concurrent batch downloads (proven safe vs yf rate-limit)
+DOWNLOAD_WORKERS        = 2     # concurrent batch downloads — kept low for Railway thread limit
 
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
@@ -1148,7 +1158,7 @@ def _topup_intraday(
                 print(f"[screener] {exchange} {bar_min}min: top-up via Angel One (today-only, 12 workers)…")
                 _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": len(tickers),
                                          "exchange": exchange, "bar_min": bar_min})
-                angel_15m = download_nse_ohlcv(tickers, intraday=True, today_only=True, max_workers=12)
+                angel_15m = download_nse_ohlcv(tickers, intraday=True, today_only=True, max_workers=4)
                 if angel_15m:
                     for ticker, df_15 in angel_15m.items():
                         df_bar = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
@@ -1226,9 +1236,8 @@ def _topup_intraday(
         _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches,
                                   "exchange": exchange, "bar_min": bar_min})
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-            for bd in pool.map(_fetch_today_batch, enumerate(batches, 1)):
-                today_bars.update(bd)
+        for bd in _EXECUTOR.map(_fetch_today_batch, enumerate(batches, 1)):
+            today_bars.update(bd)
 
     # ── Record source breakdown for /api/angel/status ────────────────────────
     angel_count = len(today_bars) - len([t for t in today_bars if t in (yf_tickers if exchange in ("NSE","BSE") else tickers)])
@@ -1301,7 +1310,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     if exchange in ("NSE", "BSE"):
         try:
             from angel_client import download_nse_ohlcv
-            angel_15m = download_nse_ohlcv(tickers, intraday=True, max_workers=6)
+            angel_15m = download_nse_ohlcv(tickers, intraday=True, max_workers=3)
             if angel_15m:
                 for ticker, df_15 in angel_15m.items():
                     df_bar = _resample_intraday(df_15, exchange, bar_min)
@@ -1355,9 +1364,8 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                 _SCREEN_PROGRESS["done"] = _intra_done[0]
                 return {}
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-            for batch_data in pool.map(_fetch_intraday_batch, enumerate(intra_batches, 1)):
-                data.update(batch_data)
+        for batch_data in _EXECUTOR.map(_fetch_intraday_batch, enumerate(intra_batches, 1)):
+            data.update(batch_data)
 
     print(f"[screener] {exchange} {bar_min}min: {len(data)} tickers — saving cache…")
     if len(data) >= max(10, len(tickers) * 0.1):   # save if ≥10% covered
@@ -1460,9 +1468,8 @@ def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str
     _SCREEN_PROGRESS.update({"phase": "topup", "done": 0, "total": n_batches, "exchange": exchange, "bar_min": 0})
 
     today_bars: Dict[str, pd.DataFrame] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-        for batch_data in pool.map(_fetch_topup_batch, enumerate(batches, 1)):
-            today_bars.update(batch_data)
+    for batch_data in _EXECUTOR.map(_fetch_topup_batch, enumerate(batches, 1)):
+        today_bars.update(batch_data)
 
     print(f"[screener] {exchange}: top-up got {len(today_bars)}/{len(tickers)} tickers for {today_str}")
 
@@ -1547,7 +1554,7 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     if exchange in ("NSE", "BSE"):
         try:
             from angel_client import download_nse_ohlcv
-            angel_data = download_nse_ohlcv(tickers, intraday=False, max_workers=6)
+            angel_data = download_nse_ohlcv(tickers, intraday=False, max_workers=3)
             if angel_data:
                 data.update(angel_data)
                 covered = set(angel_data.keys())
@@ -1592,9 +1599,8 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
             _SCREEN_PROGRESS["done"] = _done_count[0]
             return {}  # both attempts failed
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-            for batch_data in pool.map(_fetch_batch, enumerate(batches, 1)):
-                data.update(batch_data)
+        for batch_data in _EXECUTOR.map(_fetch_batch, enumerate(batches, 1)):
+            data.update(batch_data)
 
     print(f"[screener] {exchange}: {len(data)} tickers downloaded — saving cache…")
     if len(data) >= max(50, len(tickers) * 0.5):
@@ -1633,6 +1639,12 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         if as_of_date:
             try:
                 cutoff = pd.Timestamp(as_of_date)
+                # Daily bars are timestamped at midnight — cutoff at 00:00 is fine.
+                # Intraday bars are timestamped at 09:15, 10:30, … 15:30 IST — all
+                # AFTER midnight, so "2026-05-26 00:00" would exclude the entire day.
+                # Extend to end-of-day for intraday so the selected date is included.
+                if intraday:
+                    cutoff = cutoff + pd.Timedelta(hours=23, minutes=59, seconds=59)
                 idx = df.index
                 # yfinance can return tz-aware DatetimeIndex; normalize both sides
                 if hasattr(idx, "tz") and idx.tz is not None:
@@ -2201,9 +2213,8 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
             return batch_result
 
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as pool:
-                for batch_result in pool.map(_live_batch, batches):
-                    result.update(batch_result)
+            for batch_result in _EXECUTOR.map(_live_batch, batches):
+                result.update(batch_result)
             print(f"[screener] NSE live (yfinance fallback): {len(result)}/{len(tickers)} bars")
         except Exception as e:
             print(f"[screener] NSE live fallback error: {type(e).__name__}: {e}")
@@ -2356,10 +2367,9 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
                 _SCREEN_PROGRESS["done"] = _done_f[0]
 
     matched_tickers = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
-        for result in pool.map(_process, tickers):
-            if result is not None:
-                matched_tickers.append(result)
+    for result in _EXECUTOR.map(_process, tickers):
+        if result is not None:
+            matched_tickers.append(result)
 
     # Build full OHLCV only for matched tickers (typically ~20-100 vs 2109)
     matched = []

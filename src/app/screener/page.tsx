@@ -56,6 +56,7 @@ export default function ScreenerPage() {
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
   const [recentScreeners, setRecent] = useState<SavedScreener[]>([]);
+  const [scanDuration,   setScanDuration] = useState<number | null>(null);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
@@ -123,6 +124,7 @@ export default function ScreenerPage() {
     setLoading(true);
     scanStartRef.current = Date.now();
     setScanProgress(null);
+    setScanDuration(null);
     setError("");
     setWarning("");
     setResults([]);
@@ -149,7 +151,7 @@ export default function ScreenerPage() {
       if (data.warning) setWarning(data.warning);
       // ── Scan history: only for live scans (not historical as_of_date) ──────
       if (!histDate) {
-        const today = new Date().toISOString().slice(0, 10);
+        const _d = new Date(); const today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
         const todayTickers: string[] = (data.results ?? []).map((r: Result) => r.ticker);
         const hist = getScanHistory(s.id);
         const prevDate = Object.keys(hist).filter(k => k < today).sort().pop();
@@ -169,6 +171,7 @@ export default function ScreenerPage() {
     } catch(e) {
       setError(`Backend error: ${e}`);
     } finally {
+      setScanDuration(Date.now() - scanStartRef.current);
       setLoading(false);
     }
   }, []);
@@ -205,6 +208,40 @@ export default function ScreenerPage() {
     };
   }, [asOfDate, runScreen]); // eslint-disable-line react-hooks/exhaustive-deps
 
+
+  // ── CSV export ───────────────────────────────────────────────────────────
+  function exportCSV() {
+    const headers = ["Symbol","Name","Sector","Industry","Cap","Market Cap","Price","Chg%","Volume","RSI","MACD","SMA20","SMA50","SMA200","% 52H"];
+    const rows = displayResults.map(r => [
+      r.symbol, r.name, r.sector, r.industry, r.cap_size,
+      fmtCap(r.market_cap, active?.exchange ?? "NSE"),
+      r.price, r.change_pct, r.volume, r.rsi,
+      r.macd_bullish ? "Bull" : "Bear",
+      r.sma20, r.sma50, r.sma200, r.pct_from_52w_high,
+    ]);
+    const csv = [headers, ...rows].map(row => row.map(v => `"${v ?? ""}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const _fd = new Date(); const _fdate = `${_fd.getFullYear()}-${String(_fd.getMonth()+1).padStart(2,'0')}-${String(_fd.getDate()).padStart(2,'0')}`;
+    a.download = `${active?.name ?? "scan"}_${_fdate}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (e.key === "Escape" && editing) { setEditing(null); return; }
+      if (e.key === "/" && !inInput) {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editing]);
 
   // ── Sort / filter ─────────────────────────────────────────────────────────
   function handleSort(k: string) {
@@ -302,10 +339,14 @@ export default function ScreenerPage() {
   function TH({label,k}:{label:string;k:string}) {
     const on=sortKey===k;
     return <th onClick={()=>handleSort(k)}
-      className="px-2 py-1.5 cursor-pointer select-none whitespace-nowrap hover:bg-blue-100 text-left font-semibold text-gray-600 text-[11px]"
-      style={{backgroundColor:on?"#dbeafe":undefined}}>
+      className="px-2 py-1.5 cursor-pointer select-none whitespace-nowrap hover:bg-blue-100 text-left font-semibold text-[11px] transition-colors"
+      style={{
+        backgroundColor: on ? "#dbeafe" : undefined,
+        color:           on ? "#1d4ed8" : "#4b5563",
+        boxShadow:       on ? "inset 0 -2px 0 #3b82f6" : undefined,
+      }}>
       {label}
-      <span className="ml-1" style={{color:on?"#2563eb":"#9ca3af",fontSize:"9px"}}>
+      <span className="ml-1" style={{color:on?"#2563eb":"#cbd5e1",fontSize:"9px"}}>
         {on?(sortDir==="asc"?"▲":"▼"):"↕"}
       </span>
     </th>;
@@ -344,7 +385,7 @@ export default function ScreenerPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* ── Action bar ──────────────────────────────────────────────────── */}
-        <div className="px-3 py-1.5 border-b border-gray-200 bg-white flex items-center gap-2 text-xs shrink-0 shadow-sm">
+        <div className="px-3 py-1.5 border-b border-gray-200 bg-slate-50 flex items-center gap-2 text-xs shrink-0 shadow-sm">
           <button onClick={()=>setEditing("new")}
             className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
             style={{backgroundColor:"#003366"}}>
@@ -376,10 +417,17 @@ export default function ScreenerPage() {
           )}
 
           <div className="ml-auto flex items-center gap-1.5">
+            {displayResults.length > 0 && (
+              <button onClick={exportCSV}
+                title={`Export ${displayResults.length} results to CSV`}
+                className="px-2.5 py-1 rounded border border-gray-200 bg-white text-[11px] text-gray-500 hover:bg-green-50 hover:border-green-400 hover:text-green-700 transition-colors flex items-center gap-1 shrink-0">
+                ↓ CSV
+              </button>
+            )}
             {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
             <input
               type="date"
-              max={new Date().toISOString().slice(0, 10)}
+              max={(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })()}
               value={asOfDate}
               onChange={e => setAsOfDate(e.target.value)}
               className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400"
@@ -546,7 +594,7 @@ export default function ScreenerPage() {
         {!showEditor && !showFavorites && (
           <>
             {/* ── Toolbar ─────────────────────────────────────────────── */}
-            <div className="border-b border-gray-200 bg-white text-xs">
+            <div className="border-b border-gray-200 bg-slate-50 text-xs">
               {/* Row 1: scan info + view tabs */}
               <div className="px-3 py-1.5 flex items-center gap-2 flex-wrap">
                 {active ? (
@@ -572,6 +620,10 @@ export default function ScreenerPage() {
                       return <>
                         <span className="text-gray-300">·</span>
                         <span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
+                        {scanDuration != null && <>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-gray-400">{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
+                        </>}
                         {lastRefreshed && <>
                           <span className="text-gray-300">·</span>
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stale?"bg-amber-100 text-amber-700":"bg-gray-100 text-gray-500"}`}
@@ -913,8 +965,29 @@ export default function ScreenerPage() {
             )}
 
             {!loading && active && results.length===0 && !error && (
-              <div className="text-center text-xs text-gray-400 mt-16">
-                No stocks matched <code className="bg-gray-100 px-1 rounded font-mono">{active.formula}</code> on <strong>{active.exchange}</strong>.
+              <div className="flex flex-col items-center justify-center flex-1 py-20 select-none">
+                <div className="text-5xl mb-4 opacity-40">🔍</div>
+                <div className="text-sm font-semibold text-gray-500 mb-1">No matches found</div>
+                <div className="text-xs text-gray-400 mb-1">
+                  <span className="font-medium" style={{color:"#003366"}}>{active.name}</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span>{active.exchange}</span>
+                  {active.interval && active.interval !== "1d" && <>
+                    <span className="mx-1 text-gray-300">·</span>
+                    <span>{active.interval}</span>
+                  </>}
+                  {scanDuration != null && <>
+                    <span className="mx-1 text-gray-300">·</span>
+                    <span>{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
+                  </>}
+                </div>
+                <div className="text-xs text-gray-300 max-w-xs text-center leading-relaxed mt-1">
+                  Try relaxing the formula conditions, switching the exchange, or checking a historical date.
+                </div>
+                <button onClick={()=>setEditing(active)}
+                  className="mt-5 px-4 py-1.5 rounded border border-gray-300 text-xs text-gray-500 hover:bg-gray-50 hover:border-gray-400 transition-colors">
+                  Edit Formula
+                </button>
               </div>
             )}
           </>

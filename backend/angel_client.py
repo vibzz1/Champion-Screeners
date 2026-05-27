@@ -19,6 +19,9 @@ import pyotp
 import pandas as pd
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+
+# Global bounded pool — threads created once, reused across all Angel One calls
+_ANGEL_EXECUTOR = ThreadPoolExecutor(max_workers=3, thread_name_prefix="angel_worker")
 from typing import Dict, Optional, List
 
 # ── Credentials (env vars → fallback to local dev values) ─────────────────
@@ -224,7 +227,7 @@ def download_nse_ohlcv(
     tickers:     List[str],
     intraday:    bool = False,
     today_only:  bool = False,
-    max_workers: int  = 6,
+    max_workers: int  = 3,
 ) -> Dict[str, pd.DataFrame]:
     """
     Download OHLCV for NSE tickers (SYMBOL.NS format).
@@ -271,12 +274,11 @@ def download_nse_ohlcv(
         ticker, tid = args
         return ticker, fetch_fn(tid, auth_token)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        for i, (ticker, df) in enumerate(pool.map(_worker, jobs), 1):
-            if df is not None:
-                result[ticker] = df
-            if i % 300 == 0:
-                print(f"[angel] {i}/{len(jobs)} done, {len(result)} OK")
+    for i, (ticker, df) in enumerate(_ANGEL_EXECUTOR.map(_worker, jobs), 1):
+        if df is not None:
+            result[ticker] = df
+        if i % 300 == 0:
+            print(f"[angel] {i}/{len(jobs)} done, {len(result)} OK")
 
     print(f"[angel] Done: {len(result)}/{len(jobs)} symbols downloaded")
     return result
