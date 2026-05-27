@@ -37,7 +37,7 @@ async def startup_event():
     # Cap FastAPI/anyio's own thread pool — prevents it from growing to 40+ threads.
     # Without this, anyio spawns a new thread for every sync endpoint call.
     import anyio
-    limiter = anyio.from_thread.current_default_thread_limiter()
+    limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = 10
 
     # 1. Pre-warm daily cache on startup (no-op if already fresh)
