@@ -44,7 +44,18 @@ _NOT_SMA_TREND_RE = _re_module.compile(r'not_sma(\d+)_trend_dn_\d+')
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
 DATA_DIR        = BASE_DIR / "data"
-CACHE_DIR       = Path(os.environ.get("CACHE_DIR", str(BASE_DIR / "cache")))
+
+# Auto-use Railway persistent volume if mounted at /data (survives redeploys).
+# Explicit CACHE_DIR env var overrides everything.
+_data_mount = Path("/data")
+if "CACHE_DIR" in os.environ:
+    CACHE_DIR = Path(os.environ["CACHE_DIR"])
+elif _data_mount.exists() and os.access(_data_mount, os.W_OK):
+    CACHE_DIR = _data_mount / "cache"
+    print(f"[screener] Using Railway persistent volume at {CACHE_DIR}")
+else:
+    CACHE_DIR = BASE_DIR / "cache"
+
 OHLCV_CACHE_DIR = CACHE_DIR / "ohlcv"
 INFO_CACHE_FILE = CACHE_DIR / "info_cache.json"
 
@@ -1393,12 +1404,24 @@ def _load_ohlcv_cache(exchange: str) -> Optional[Dict[str, pd.DataFrame]]:
     return None
 
 def _save_ohlcv_cache(exchange: str, data: Dict[str, pd.DataFrame]):
+    # Guard: refuse to overwrite a healthy cache with a sparse/broken download.
+    # yfinance outages sometimes return data for only a fraction of tickers.
+    # Threshold: new data must cover ≥30% of the existing cache's ticker count.
+    existing = _load_ohlcv_cache(exchange)
+    if existing and len(data) < max(10, int(len(existing) * 0.30)):
+        print(
+            f"[screener] {exchange}: SKIPPING cache overwrite — "
+            f"new data has {len(data)} tickers vs existing {len(existing)} "
+            f"(< 30% coverage). yfinance may be degraded."
+        )
+        return
     # Remove old cache files for this exchange
     for old in OHLCV_CACHE_DIR.glob(f"{exchange}_*.pkl"):
         try: old.unlink()
         except: pass
     with open(_ohlcv_cache_path(exchange), "wb") as f:
         pickle.dump(data, f, protocol=4)
+    print(f"[screener] {exchange}: saved {len(data)}-ticker OHLCV cache")
 
 def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str]) -> Dict[str, pd.DataFrame]:
     """Lightweight parallel top-up: fetch today's partial daily bar for all tickers.

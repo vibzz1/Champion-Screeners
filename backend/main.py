@@ -14,6 +14,16 @@ from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_form
 
 models.Base.metadata.create_all(bind=engine)
 
+# ── Sentry — initialise before the app so all exceptions are captured ─────────
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        traces_sample_rate=0.1,
+        environment=os.environ.get("RAILWAY_ENVIRONMENT", "production"),
+    )
+
 app = FastAPI()
 
 # ── Cache pre-warm scheduler ────────────────────────────────────────────────
@@ -72,6 +82,83 @@ async def startup_event():
 @app.get("/api/screener/progress")
 def screener_progress():
     return dict(_SCREEN_PROGRESS)
+
+@app.get("/api/health")
+def health_check():
+    """Comprehensive health check — used by QA cron and Playwright smoke tests.
+    Returns status='ok' only when yfinance responds AND the executor is alive."""
+    import datetime
+    import concurrent.futures
+    from screener import _EXECUTOR
+
+    # 1. yfinance quick probe (fast_info is cheap — no full download)
+    yf_ok = False
+    yf_error = None
+    try:
+        import yfinance as yf
+        fi = yf.Ticker("RELIANCE.NS").fast_info
+        _ = fi.market_cap   # triggers network call
+        yf_ok = True
+    except Exception as e:
+        yf_error = str(e)
+
+    # 2. Cache inventory
+    cache_files = sorted(OHLCV_CACHE_DIR.glob("*.pkl")) if OHLCV_CACHE_DIR.exists() else []
+    newest_cache_age_hours = None
+    if cache_files:
+        newest = max(cache_files, key=lambda f: f.stat().st_mtime)
+        age_s = datetime.datetime.now().timestamp() - newest.stat().st_mtime
+        newest_cache_age_hours = round(age_s / 3600, 1)
+
+    # 3. Executor health
+    executor_alive = not _EXECUTOR._shutdown
+
+    # 4. anyio thread pool
+    import anyio
+    limiter = anyio.to_thread.current_default_thread_limiter()
+
+    status = "ok" if (yf_ok and executor_alive) else "degraded"
+    result = {
+        "status": status,
+        "yfinance": "ok" if yf_ok else f"error: {yf_error}",
+        "cache_files": len(cache_files),
+        "newest_cache_age_hours": newest_cache_age_hours,
+        "executor_alive": executor_alive,
+        "anyio_tokens_total": limiter.total_tokens,
+        "anyio_tokens_available": limiter.available_tokens,
+        "sentry_active": bool(_sentry_dsn),
+    }
+    return result
+
+@app.post("/api/screener/validate")
+def validate_formula_endpoint(body: dict):
+    """Parse a formula and return {valid, warnings, filter_count, block_count}.
+    Called by the frontend before saving a screener to give the user early feedback."""
+    import re as _re
+    formula = (body.get("formula") or "").strip()
+    if not formula:
+        return {"valid": True, "warnings": [], "filter_count": 0, "block_count": 0}
+
+    blocks = [b.strip() for b in _re.split(r'\n\s*\n', formula) if b.strip()]
+    warnings = []
+    total_filters = 0
+
+    for i, block in enumerate(blocks, 1):
+        parsed = parse_formula(block)
+        if not parsed:
+            warnings.append(
+                f"Block {i}: no recognised filter clauses — "
+                "check for typos or unsupported syntax"
+            )
+        else:
+            total_filters += len(parsed)
+
+    return {
+        "valid": len(warnings) == 0,
+        "warnings": warnings,
+        "filter_count": total_filters,
+        "block_count": len(blocks),
+    }
 
 @app.get("/api/angel/status")
 def angel_status():

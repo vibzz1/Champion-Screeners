@@ -13,6 +13,32 @@ import { ScanProgress }      from "./ScanProgress";
 const API     = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const LS_KEY = SCREENER_LS_KEY;
 
+// ── Fetch with exponential-backoff retry ─────────────────────────────────────
+// Retries on network errors and 5xx responses; never retries 4xx (client errors).
+async function fetchWithRetry(
+  url: string,
+  opts: RequestInit,
+  maxRetries = 2,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, opts);
+      if (res.ok) return res;
+      if (res.status >= 400 && res.status < 500) return res; // 4xx — not retryable
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    if (attempt < maxRetries) {
+      const delay = 1000 * Math.pow(2, attempt); // 1s, 2s
+      console.warn(`[MIO] fetch attempt ${attempt + 1} failed — retrying in ${delay}ms`, lastErr);
+      await new Promise<void>(r => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 function emit(type: string, detail: object = {}) {
   if (typeof window !== "undefined")
     window.dispatchEvent(new CustomEvent(type, { detail }));
@@ -136,7 +162,7 @@ export default function ScreenerPage() {
     setPrevTS(null);
     setScanDiff(null);
     try {
-      const res = await fetch(`${API}/api/screener/run`, {
+      const res = await fetchWithRetry(`${API}/api/screener/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ exchange: s.exchange, formula: s.formula, interval: s.interval ?? "1d", ...(histDate ? { as_of_date: histDate } : {}) }),
@@ -170,7 +196,13 @@ export default function ScreenerPage() {
         saveScanHistory(s.id, today, todayTickers);
       }
     } catch(e) {
-      setError(`Backend error: ${e}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      const isNetwork = msg.includes("fetch") || msg.includes("network") || msg.includes("Failed");
+      setError(
+        isNetwork
+          ? `Can't reach the backend (tried 3×). Check your connection or try again in a moment. (${msg})`
+          : `Scan failed: ${msg}`
+      );
     } finally {
       setScanDuration(Date.now() - scanStartRef.current);
       setLoading(false);
