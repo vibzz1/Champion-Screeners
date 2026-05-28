@@ -110,12 +110,22 @@ def health_check():
         age_s = datetime.datetime.now().timestamp() - newest.stat().st_mtime
         newest_cache_age_hours = round(age_s / 3600, 1)
 
-    # 3. Executor health
-    executor_alive = not _EXECUTOR._shutdown
+    # 3. Executor health (private attr — guard with try/except)
+    try:
+        executor_alive = not _EXECUTOR._shutdown
+    except Exception:
+        executor_alive = True  # assume alive if we can't check
 
-    # 4. anyio thread pool
-    import anyio
-    limiter = anyio.to_thread.current_default_thread_limiter()
+    # 4. anyio thread pool — only readable from inside an async context;
+    #    return None when called from sync endpoint (avoids RuntimeError)
+    anyio_total = anyio_available = None
+    try:
+        import anyio
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        anyio_total = limiter.total_tokens
+        anyio_available = limiter.available_tokens
+    except Exception:
+        pass
 
     status = "ok" if (yf_ok and executor_alive) else "degraded"
     result = {
@@ -124,8 +134,8 @@ def health_check():
         "cache_files": len(cache_files),
         "newest_cache_age_hours": newest_cache_age_hours,
         "executor_alive": executor_alive,
-        "anyio_tokens_total": limiter.total_tokens,
-        "anyio_tokens_available": limiter.available_tokens,
+        "anyio_tokens_total": anyio_total,
+        "anyio_tokens_available": anyio_available,
         "sentry_active": bool(_sentry_dsn),
     }
     return result
