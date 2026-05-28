@@ -10,9 +10,13 @@ function loadScreeners(): SavedScreener[] {
   try {
     const raw = localStorage.getItem(SCREENER_LS_KEY);
     const saved: SavedScreener[] = raw ? JSON.parse(raw) : [];
+    const savedMap = new Map(saved.map(s => [s.id, s]));
     const defaultIds = new Set(DEFAULTS.map(d => d.id));
+    // Built-ins: use user's saved version if they've edited it, else code default
+    const builtins = DEFAULTS.map(d => savedMap.get(d.id) ?? d);
+    // Custom: any saved screener not in DEFAULTS
     const custom = saved.filter(s => !defaultIds.has(s.id));
-    return [...DEFAULTS, ...custom];
+    return [...builtins, ...custom];
   } catch { return DEFAULTS; }
 }
 
