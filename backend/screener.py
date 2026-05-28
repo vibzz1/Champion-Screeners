@@ -1737,26 +1737,21 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         _T = 5 if intraday else 1          # intraday scale factor
 
         sma50_series     = close.rolling(50).mean()
-        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 1)]) if len(sma50_series) >= 50*_T + 1 else None
-        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 1)]) if len(sma50_series) >= 50*_T + 6 else None
-        sma50_trend_dn_5  = bool(sma50 is not None and sma50_5bars_ago is not None
-                                  and sma50 < sma50_5bars_ago)
-        sma50_trend_dn_20 = bool(sma50 is not None and (
-            (sma50_20bars_ago is not None and sma50 < sma50_20bars_ago) or sma50_trend_dn_5
-        ))
+        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 1)]) if len(sma50_series) >= 50 + 20*_T + 1 else None
+        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 1)]) if len(sma50_series) >= 50 + 5*_T  + 1 else None
+        # MIO semantics: trend_dn N = SMA today < SMA exactly N bars ago (pure point-to-point).
+        # No OR fallback — a 5-bar dip that recovered by day 10 is NOT trend_dn 10.
+        sma50_trend_dn_5  = bool(sma50 is not None and sma50_5bars_ago  is not None and sma50 < sma50_5bars_ago)
+        sma50_trend_dn_20 = bool(sma50 is not None and sma50_20bars_ago is not None and sma50 < sma50_20bars_ago)
 
         # sma(20) trend direction — scaled lookback for intraday
         sma20_series     = close.rolling(20).mean()
         sma20_10bars_ago = float(sma20_series.iloc[-(10*_T + 1)]) if len(sma20_series) >= 20 + 10*_T + 1 else None
         sma20_5bars_ago  = float(sma20_series.iloc[-(5*_T  + 1)]) if len(sma20_series) >= 20 + 5*_T  + 1 else None
-        sma20_trend_dn_5  = bool(sma20 is not None and sma20_5bars_ago is not None
-                                  and sma20 < sma20_5bars_ago)
-        sma20_trend_dn_10 = bool(sma20 is not None and (
-            (sma20_10bars_ago is not None and sma20 < sma20_10bars_ago) or sma20_trend_dn_5
-        ))
-        sma20_trend_dn_20 = bool(sma20 is not None and (
-            (len(sma20_series) >= 20 + 20*_T + 1 and sma20 < float(sma20_series.iloc[-(20*_T + 1)])) or sma20_trend_dn_5
-        ))
+        sma20_20bars_ago = float(sma20_series.iloc[-(20*_T + 1)]) if len(sma20_series) >= 20 + 20*_T + 1 else None
+        sma20_trend_dn_5  = bool(sma20 is not None and sma20_5bars_ago  is not None and sma20 < sma20_5bars_ago)
+        sma20_trend_dn_10 = bool(sma20 is not None and sma20_10bars_ago is not None and sma20 < sma20_10bars_ago)
+        sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
 
         # Relative volume: today's volume vs 20-day average
         rvol = _sf(float(vol.iloc[-1]) / avg_vol_20, 2) if avg_vol_20 > 0 else None
