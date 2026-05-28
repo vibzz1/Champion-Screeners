@@ -39,7 +39,6 @@ import pytz
 
 # Pre-compiled regex used in the hot apply_filters loop
 _NOT_BELOW_RE    = _re_module.compile(r'not_price_below_sma(\d+)_and_trend_dn_(\d+)')
-_NOT_SMA_TREND_RE = _re_module.compile(r'not_sma(\d+)_trend_dn_\d+')
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
@@ -2047,19 +2046,13 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
                     return False
 
     # !(sma(N) trend_dn M) — SMA must NOT be falling: reject if it IS falling
-    # Also checks the precomputed 5-bar short slope so stocks that just started turning
-    # down are caught even when sma_now > sma_M_bars_ago (peaked recently, M-bar still net up)
+    # Pure point-to-point: sma_now < sma_M_bars_ago → reject.
+    # Matches MIO semantics exactly (no 5-bar secondary check).
     for fkey, fval in f.items():
         if fval is True and fkey.startswith('not_sma') and '_trend_dn_' in fkey:
             actual_key = fkey[4:]  # strip leading "not_" → e.g. sma20_trend_dn_10
             if ind.get(actual_key, False):
                 return False
-            # Short-slope safety net: also reject if SMA declined over last 5 bars
-            sma_n_match = _NOT_SMA_TREND_RE.match(fkey)
-            if sma_n_match:
-                short_key = f"sma{sma_n_match.group(1)}_trend_dn_5"
-                if ind.get(short_key, False):
-                    return False
 
     # SMA trend direction — any sma{N}_trend_dn_{M} or sma{N}_trend_up_{M} key
     for fkey, fval in f.items():
