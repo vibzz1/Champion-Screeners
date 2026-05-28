@@ -88,17 +88,22 @@ export default function ScreenerPage() {
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
 
   // ── Persistence ──────────────────────────────────────────────────────────
-  // Built-ins (d1–d6) always come from DEFAULTS in code — never from localStorage.
-  // localStorage only stores user-created custom screeners (non-"d" prefix IDs).
+  // Built-ins are seeded from DEFAULTS in code but can be overridden by the user.
+  // When a built-in is edited and saved, the user's version is stored in localStorage
+  // and takes priority over the code default on next load.
+  // New built-ins added in code appear fresh only for users who haven't customised them.
   const DEFAULT_IDS = new Set(DEFAULTS.map(d => d.id));
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
       const saved: SavedScreener[] = raw ? JSON.parse(raw) : [];
-      // Keep only user-created screeners (not built-ins)
+      const savedMap = new Map(saved.map(s => [s.id, s]));
+      // Built-ins: use user's saved version if they've edited it, else code default
+      const builtins = DEFAULTS.map(d => savedMap.get(d.id) ?? d);
+      // Custom: any saved screener not in DEFAULTS
       const custom = saved.filter(s => !DEFAULT_IDS.has(s.id));
-      setScreeners([...DEFAULTS, ...custom]);
+      setScreeners([...builtins, ...custom]);
     } catch { setScreeners(DEFAULTS); }
   }, []);
 
@@ -123,9 +128,15 @@ export default function ScreenerPage() {
 
   function persist(list: SavedScreener[]) {
     setScreeners(list);
-    // Only persist custom screeners; built-ins always loaded fresh from code
-    const custom = list.filter(s => !DEFAULT_IDS.has(s.id));
-    localStorage.setItem(LS_KEY, JSON.stringify(custom));
+    // Save all screeners — built-ins that differ from code defaults are stored
+    // so user edits (e.g. changing advol from 50→100) survive page reloads.
+    const defaultsMap = new Map(DEFAULTS.map(d => [d.id, d]));
+    const toSave = list.filter(s => {
+      const def = defaultsMap.get(s.id);
+      if (!def) return true; // user-created — always save
+      return JSON.stringify(s) !== JSON.stringify(def); // built-in — save only if changed
+    });
+    localStorage.setItem(LS_KEY, JSON.stringify(toSave));
   }
 
   function saveScreener(s: SavedScreener) {
