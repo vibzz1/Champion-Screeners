@@ -738,16 +738,15 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
                 result['macd_signal'] = 'bearish'; matched = True
 
             # advol(n) > X  — average DOLLAR volume.
-            # MIO expresses X in LAKHS for NSE/BSE; in local-currency MILLIONS for other exchanges.
-            # We store dollar_vol_* in millions → divide by 10 for NSE/BSE only.
+            # MIO expresses X in MILLIONS of local currency for all exchanges
+            # (including NSE/BSE — verified against MIO results May 2026).
+            # We store dollar_vol_* in millions → no conversion needed.
             # advol(20) → dollar_vol_min  |  advol(50) → dollar_vol_50_min
             elif (m := _re.match(r'advol\s*\(\s*(\d+)\s*\)\s*([><=]+)\s*([\d.]+)', p)):
                 n_adv, op, val = int(m.group(1)), m.group(2), float(m.group(3))
                 if '>' in op:
                     key = 'dollar_vol_50_min' if n_adv == 50 else 'dollar_vol_min'
-                    # NSE/BSE: threshold is in lakhs → convert to millions (÷10)
-                    divisor = 10.0 if exchange.upper() in ("NSE", "BSE") else 1.0
-                    result[key] = max(result.get(key) or 0, val / divisor)
+                    result[key] = max(result.get(key) or 0, val)
                 matched = True
 
             # avol(n) > X  — average SHARE volume in millions
@@ -1822,12 +1821,9 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
 
         # !(sma(A) < sma(B))@{0..N} — MIO existential lookback:
-        # Reject only if sma(A) has been CONTINUOUSLY below sma(B) for all N bars
-        # (i.e., the condition was NEVER relieved in the lookback window).
-        # Passes even if sma(A) dipped below sma(B) recently, as long as it was
-        # above at SOME POINT in the last N bars.  Matches SUNPHARMA and other stocks
-        # that are in price uptrends but whose 20-day SMA hasn't fully crossed the
-        # 50-day SMA yet.
+        # True if sma(A) was >= sma(B) at ANY point in the last N bars.
+        # MIO rejects only stocks where sma(A) was CONTINUOUSLY below sma(B)
+        # for the entire window — i.e. the cross never recovered at all.
         sma20_not_below_sma50_lookback_20 = False
         if len(sma20_series) >= 20 and len(sma50_series) >= 20:
             _t20 = sma20_series.iloc[-20:]
@@ -2133,8 +2129,8 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
                 if sma_val is not None and ind["price"] < sma_val and trend_dn:
                     return False
 
-    # !(sma(A) < sma(B))@{0..N} — strict SMA cross lookback
-    # Reject if sma(A) was below sma(B) at ANY point in the last N bars.
+    # !(sma(A) < sma(B))@{0..N} — existential lookback
+    # Passes if sma(A) >= sma(B) at ANY of the last N bars (not continuously below).
     for fkey, fval in f.items():
         if fval is True and '_not_below_sma' in fkey and '_lookback_' in fkey:
             if not ind.get(fkey, False):
