@@ -1553,11 +1553,14 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
             import nse_bhavcopy
             bhav_data = nse_bhavcopy.load_ohlcv()
             if bhav_data:
+                # Filter to universe tickers only — Bhavcopy contains ALL NSE EQ stocks
+                # but we must only scan the symbols in nse_tickers.txt
+                universe_data = {t: bhav_data[t] for t in tickers if t in bhav_data}
                 yf_miss = [t for t in tickers if t not in bhav_data]
                 if yf_miss:
-                    print(f"[screener] Bhavcopy: {len(bhav_data)} tickers loaded; "
+                    print(f"[screener] Bhavcopy: {len(universe_data)}/{len(tickers)} universe tickers; "
                           f"{len(yf_miss)} not in DB — yfinance fallback")
-                    # yfinance for the gap (rare: new listings, ETFs not in Bhavcopy)
+                    # yfinance for the gap (rare: new listings not yet in Bhavcopy)
                     try:
                         raw_miss = yf.download(
                             yf_miss, period="1y", auto_adjust=True,
@@ -1566,14 +1569,14 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                         for t in yf_miss:
                             df_t = _normalize_df(raw_miss, t)
                             if df_t is not None and not df_t.empty:
-                                bhav_data[t] = df_t
+                                universe_data[t] = df_t
                     except Exception as _e:
                         print(f"[screener] yfinance gap-fill failed: {_e}")
                 else:
-                    print(f"[screener] Bhavcopy: {len(bhav_data)} tickers loaded (full coverage)")
-                _SCREEN_PROGRESS.update({"phase": "cache", "done": len(bhav_data),
-                                         "total": len(bhav_data), "exchange": exchange, "bar_min": 0})
-                return bhav_data
+                    print(f"[screener] Bhavcopy: {len(universe_data)}/{len(tickers)} universe tickers (full coverage)")
+                _SCREEN_PROGRESS.update({"phase": "cache", "done": len(universe_data),
+                                         "total": len(universe_data), "exchange": exchange, "bar_min": 0})
+                return universe_data
         except Exception as e:
             print(f"[screener] Bhavcopy error ({type(e).__name__}: {e}); falling back to disk cache / yfinance")
 
