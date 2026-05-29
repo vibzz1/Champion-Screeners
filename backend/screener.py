@@ -654,7 +654,19 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
     _SKIP = _re.compile(r'^exch\s*\(')   # exch(nse) — handled by exchange selector
 
     for raw in parts:
-        # Strip MIO lookback modifier @{N..M} — treat condition as current-state check
+        # !(sma(A) < sma(B))@{0..N} — MIO strict lookback: sma(A) must stay ≥ sma(B)
+        # for ALL of the last N bars.  Must be handled BEFORE the @{} strip below.
+        _lb = _re.match(
+            r'!\s*\(?\s*sma\s*\(?\s*(\d+)\s*\)?\s*<\s*sma\s*\(?\s*(\d+)\s*\)?\s*\)?\s*'
+            r'@\{\s*\d+\s*\.\.\s*(\d+)\s*\}',
+            raw.strip(), _re.IGNORECASE,
+        )
+        if _lb:
+            a, b, n = int(_lb.group(1)), int(_lb.group(2)), int(_lb.group(3))
+            result[f'sma{a}_not_below_sma{b}_lookback_{n}'] = True
+            continue   # fully handled — skip normal clause parsing
+
+        # Strip MIO lookback modifier @{N..M} for all other clauses
         raw = _re.sub(r'@\{\s*\d+\s*\.\.\s*\d+\s*\}', '', raw)
 
         # Strip at most one layer of enclosing parentheses (not all)
@@ -1808,6 +1820,17 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         sma20_trend_dn_10 = bool(sma20 is not None and sma20_10bars_ago is not None and sma20 < sma20_10bars_ago)
         sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
 
+        # !(sma(20) < sma(50))@{0..20} — strict lookback: sma20 must be ≥ sma50 for
+        # every one of the last 20 bars (MIO rejects stocks where SMA20 recently
+        # dipped below SMA50 even if it has since recovered).
+        sma20_not_below_sma50_lookback_20 = False
+        if len(sma20_series) >= 20 and len(sma50_series) >= 20:
+            _t20 = sma20_series.iloc[-20:]
+            _t50 = sma50_series.iloc[-20:]
+            _both_valid = _t20.notna() & _t50.notna()
+            if _both_valid.all():
+                sma20_not_below_sma50_lookback_20 = bool((_t20 >= _t50).all())
+
         # Relative volume: today's volume vs 20-day average
         rvol = _sf(float(vol.iloc[-1]) / avg_vol_20, 2) if avg_vol_20 > 0 else None
 
@@ -1915,6 +1938,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             "sma20_trend_dn_5":  sma20_trend_dn_5,
             "sma20_trend_dn_10": sma20_trend_dn_10,
             "sma20_trend_dn_20": sma20_trend_dn_20,
+            "sma20_not_below_sma50_lookback_20": sma20_not_below_sma50_lookback_20,
             "rvol":              rvol,
             "gap_pct":           gap_pct,
             "offh_21":           offh_21,
@@ -2100,6 +2124,13 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
                 trend_dn = ind.get(f"sma{n_s}_trend_dn_{bars_s}", False)
                 if sma_val is not None and ind["price"] < sma_val and trend_dn:
                     return False
+
+    # !(sma(A) < sma(B))@{0..N} — strict SMA cross lookback
+    # Reject if sma(A) was below sma(B) at ANY point in the last N bars.
+    for fkey, fval in f.items():
+        if fval is True and '_not_below_sma' in fkey and '_lookback_' in fkey:
+            if not ind.get(fkey, False):
+                return False
 
     # !(sma(N) trend_dn M) — SMA must NOT be falling: reject if it IS falling
     # Pure point-to-point: sma_now < sma_M_bars_ago → reject.
