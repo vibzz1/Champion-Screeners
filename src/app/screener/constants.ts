@@ -15,7 +15,7 @@ export const CHIPS = [
   "price > bb_upper", "price < bb_lower",
 ];
 
-export const SCREENER_LS_KEY = "mio_screeners_v6";
+export const SCREENER_LS_KEY = "mio_screeners_v7";  // bumped: advol thresholds ×10 for NSE unit fix
 
 export const DEFAULTS: SavedScreener[] = [
   { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 500 and advol(50) > 500 and sma(10) > sma(50) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
