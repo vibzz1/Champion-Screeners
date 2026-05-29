@@ -50,6 +50,27 @@ async def startup_event():
     limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = 10
 
+    # 0. Bhavcopy: backfill history if DB is empty; update today's data after 18:30 IST
+    def _bhavcopy_startup():
+        import datetime as _dt
+        import pytz as _tz
+        try:
+            import nse_bhavcopy
+            status = nse_bhavcopy.get_status()
+            if not status.get("days_stored"):
+                print("[bhavcopy] DB empty — starting backfill(400) …")
+                nse_bhavcopy.backfill(days=400)
+            elif status.get("latest_date", "") < _dt.date.today().isoformat():
+                # Today's data may be available after 18:30 IST
+                ist     = _tz.timezone("Asia/Kolkata")
+                now_ist = _dt.datetime.now(_tz.utc).astimezone(ist)
+                if now_ist.hour >= 18 and now_ist.minute >= 30:
+                    nse_bhavcopy.update_today()
+        except Exception as e:
+            print(f"[bhavcopy] startup check failed: {e}")
+
+    threading.Thread(target=_bhavcopy_startup, daemon=True).start()
+
     # 1. Pre-warm daily cache on startup (no-op if already fresh)
     threading.Thread(target=_prewarm_daily_background, daemon=True).start()
     # 1b. Also kick off intraday pre-warm on startup (no-op if cache fresh)
@@ -74,8 +95,24 @@ async def startup_event():
             id="nse_prewarm_intraday",
             replace_existing=True,
         )
+        # Bhavcopy nightly update: 19:00 IST = 13:30 UTC  (NSE publishes ~6:30pm)
+        def _bhav_update_job():
+            try:
+                import nse_bhavcopy
+                nse_bhavcopy.invalidate_cache()   # flush in-memory cache
+                ok = nse_bhavcopy.update_today()
+                print(f"[bhavcopy] Nightly update: {'✓' if ok else 'skipped (holiday/weekend)'}")
+            except Exception as e:
+                print(f"[bhavcopy] Nightly update error: {e}")
+
+        scheduler.add_job(
+            _bhav_update_job,
+            CronTrigger(hour=13, minute=30, day_of_week="mon-fri", timezone=pytz.utc),
+            id="bhavcopy_nightly",
+            replace_existing=True,
+        )
         scheduler.start()
-        print("[prewarm] Scheduler started — daily@08:00IST, intraday@09:45IST (Mon–Fri)")
+        print("[prewarm] Scheduler started — daily@08:00IST, intraday@09:45IST, bhavcopy@19:00IST (Mon–Fri)")
     except Exception as e:
         print(f"[prewarm] Scheduler setup failed: {e}")
 
@@ -153,8 +190,9 @@ def validate_formula_endpoint(body: dict):
     warnings = []
     total_filters = 0
 
+    exchange = body.get("exchange", "")
     for i, block in enumerate(blocks, 1):
-        parsed = parse_formula(block)
+        parsed = parse_formula(block, exchange=exchange)
         if not parsed:
             warnings.append(
                 f"Block {i}: no recognised filter clauses — "
@@ -216,6 +254,27 @@ def cache_status():
         "today": datetime.date.today().isoformat(),
         "files": files,
     }
+
+@app.get("/api/screener/bhavcopy/status")
+def bhavcopy_status():
+    """NSE Bhavcopy DB health — source, dates covered, tickers, and cache state."""
+    try:
+        import nse_bhavcopy
+        return nse_bhavcopy.get_status()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/api/screener/bhavcopy/backfill")
+def bhavcopy_backfill(body: dict = {}):
+    """Trigger a Bhavcopy backfill in the background. Returns immediately."""
+    days = int(body.get("days", 400))
+    import threading, nse_bhavcopy
+    threading.Thread(
+        target=nse_bhavcopy.backfill,
+        kwargs={"days": days},
+        daemon=True,
+    ).start()
+    return {"status": "backfill started", "days": days}
 
 app.add_middleware(
     CORSMiddleware,
@@ -434,7 +493,7 @@ def screener_run(body: ScreenerFilters):
     if body.formula and body.formula.strip():
         # Split on one or more blank lines — MIO uses blank lines as OR between blocks
         blocks = [b.strip() for b in _re.split(r'\n\s*\n', body.formula.strip()) if b.strip()]
-        filter_blocks = [parse_formula(b) for b in blocks]
+        filter_blocks = [parse_formula(b, exchange=body.exchange) for b in blocks]
         # Drop blocks where nothing was recognised
         filter_blocks = [f for f in filter_blocks if f]
         if not filter_blocks:
@@ -469,8 +528,9 @@ def screener_run(body: ScreenerFilters):
 @app.post("/api/screener/parse")
 def parse_formula_endpoint(body: dict):
     """Parse a formula string and return the resulting filter dict."""
-    formula = body.get("formula", "")
-    return parse_formula(formula)
+    formula  = body.get("formula", "")
+    exchange = body.get("exchange", "")
+    return parse_formula(formula, exchange=exchange)
 
 @app.post("/api/screener/explain")
 def explain_ticker(body: dict):
@@ -519,7 +579,7 @@ def explain_ticker(body: dict):
     if ind is None:
         return {"error": f"compute_indicators returned None — not enough history"}
 
-    filters = parse_formula(formula) if formula else {}
+    filters = parse_formula(formula, exchange=exchange) if formula else {}
 
     # Evaluate each filter key individually
     checks = {}

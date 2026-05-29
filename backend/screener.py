@@ -562,8 +562,15 @@ PRESETS = {
 }
 
 # ── Formula parser ────────────────────────────────────────────────────────
-def parse_formula(formula: str) -> Dict:
+def parse_formula(formula: str, exchange: str = "") -> Dict:
     """Convert a plain-text formula string into a filter dict.
+
+    Args:
+        formula:  Plain-text MIO-style formula.
+        exchange: Exchange hint ("NSE", "BSE", "SP500", …).  Used to apply the
+                  correct advol unit conversion: MIO expresses advol thresholds
+                  in LAKHS of local currency for NSE/BSE; in local-currency
+                  MILLIONS for other markets.
 
     Clauses are separated by 'and' (case-insensitive). Supported syntax:
 
@@ -717,13 +724,17 @@ def parse_formula(formula: str) -> Dict:
             elif _re.match(r'macd_?bearish', p):
                 result['macd_signal'] = 'bearish'; matched = True
 
-            # advol(n) > X  — average DOLLAR volume in millions (MIO: price × volume ÷ 1M)
+            # advol(n) > X  — average DOLLAR volume.
+            # MIO expresses X in LAKHS for NSE/BSE; in local-currency MILLIONS for other exchanges.
+            # We store dollar_vol_* in millions → divide by 10 for NSE/BSE only.
             # advol(20) → dollar_vol_min  |  advol(50) → dollar_vol_50_min
             elif (m := _re.match(r'advol\s*\(\s*(\d+)\s*\)\s*([><=]+)\s*([\d.]+)', p)):
                 n_adv, op, val = int(m.group(1)), m.group(2), float(m.group(3))
                 if '>' in op:
                     key = 'dollar_vol_50_min' if n_adv == 50 else 'dollar_vol_min'
-                    result[key] = max(result.get(key) or 0, val)
+                    # NSE/BSE: threshold is in lakhs → convert to millions (÷10)
+                    divisor = 10.0 if exchange.upper() in ("NSE", "BSE") else 1.0
+                    result[key] = max(result.get(key) or 0, val / divisor)
                 matched = True
 
             # avol(n) > X  — average SHARE volume in millions
@@ -1525,15 +1536,47 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     Each stored DataFrame has flat columns [Open, High, Low, Close, Volume]
     with NaN rows already dropped — safe to iterate directly.
 
-    For NSE/BSE: tries Angel One SmartAPI first (400 days); yfinance fallback for any missed symbols.
-    For US exchanges: yfinance only.
+    For NSE:      NSE Bhavcopy DB is tried first (official NSE data, same source as MIO).
+                  yfinance fallback for any tickers absent from the Bhavcopy DB.
+    For BSE:      Angel One SmartAPI first; yfinance fallback for any missed symbols.
+    For US/other: yfinance only.
 
-    Cache strategy:
+    Cache strategy (non-NSE / Bhavcopy-empty fallback):
       - Today's cache exists  → return instantly (already has today's bars)
       - Stale cache (≤5 days) → load it, run a fast parallel period='2d' top-up to add
                                  today's partial bar, save as today's cache, return
       - No cache              → full cold-start download (period='1y'), save, return
     """
+    # ── NSE Bhavcopy shortcut (skips disk cache — Bhavcopy has its own in-memory cache) ──
+    if exchange == "NSE":
+        try:
+            import nse_bhavcopy
+            bhav_data = nse_bhavcopy.load_ohlcv()
+            if bhav_data:
+                yf_miss = [t for t in tickers if t not in bhav_data]
+                if yf_miss:
+                    print(f"[screener] Bhavcopy: {len(bhav_data)} tickers loaded; "
+                          f"{len(yf_miss)} not in DB — yfinance fallback")
+                    # yfinance for the gap (rare: new listings, ETFs not in Bhavcopy)
+                    try:
+                        raw_miss = yf.download(
+                            yf_miss, period="1y", auto_adjust=True,
+                            progress=False, group_by="ticker", threads=True,
+                        )
+                        for t in yf_miss:
+                            df_t = _normalize_df(raw_miss, t)
+                            if df_t is not None and not df_t.empty:
+                                bhav_data[t] = df_t
+                    except Exception as _e:
+                        print(f"[screener] yfinance gap-fill failed: {_e}")
+                else:
+                    print(f"[screener] Bhavcopy: {len(bhav_data)} tickers loaded (full coverage)")
+                _SCREEN_PROGRESS.update({"phase": "cache", "done": len(bhav_data),
+                                         "total": len(bhav_data), "exchange": exchange, "bar_min": 0})
+                return bhav_data
+        except Exception as e:
+            print(f"[screener] Bhavcopy error ({type(e).__name__}: {e}); falling back to disk cache / yfinance")
+
     cached = _load_ohlcv_cache(exchange)
     if cached is not None:
         # Check whether the cache already contains today's bars.
@@ -1570,10 +1613,12 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
         return cached
 
     data: Dict[str, pd.DataFrame] = {}
-    yf_tickers = list(tickers)   # shrinks as Angel One covers symbols
+    yf_tickers = list(tickers)   # shrinks as each source covers symbols
 
-    # ── Angel One first-pass (NSE/BSE only) ──────────────────────────────
-    if exchange in ("NSE", "BSE"):
+    # (NSE Bhavcopy handled above — code only reaches here for BSE/US or if Bhavcopy errored)
+
+    # ── Angel One first-pass (BSE only — Bhavcopy handles NSE) ──────────
+    if exchange == "BSE" and yf_tickers:
         try:
             from angel_client import download_nse_ohlcv
             angel_data = download_nse_ohlcv(tickers, intraday=False, max_workers=3)
@@ -1581,7 +1626,7 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                 data.update(angel_data)
                 covered = set(angel_data.keys())
                 yf_tickers = [t for t in tickers if t not in covered]
-                print(f"[screener] Angel One daily: {len(covered)}/{len(tickers)} covered; "
+                print(f"[screener] Angel One daily (BSE): {len(covered)}/{len(tickers)} covered; "
                       f"{len(yf_tickers)} falling back to yfinance")
         except Exception as e:
             print(f"[screener] Angel One daily skipped ({type(e).__name__}: {e}); using yfinance only")
@@ -1721,10 +1766,18 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         day_range = hi_last - lo_last
         candle_pos = _sf((price - lo_last) / day_range, 4) if day_range > 0 else None
 
-        # Dollar volume (advol): avg(price × volume) over N bars, in millions — MIO standard
-        dv_series     = close * vol
-        dollar_vol_20 = _sf(float(dv_series.tail(20).mean()) / 1_000_000, 3)
-        dollar_vol_50 = _sf(float(dv_series.tail(50).mean()) / 1_000_000, 3) if len(dv_series) >= 50 else None
+        # Dollar volume (advol): avg daily rupee turnover in millions — MIO standard.
+        # Prefer Bhavcopy's TURNOVER_LACS column (official NSE value, in lakhs).
+        # Divide by 10 to convert lakhs → millions so it matches our dollar_vol_* units.
+        # Fall back to price × volume when TurnoverLacs is absent (yfinance data).
+        if "TurnoverLacs" in df.columns:
+            tl = df["TurnoverLacs"]
+            dollar_vol_20 = _sf(float(tl.iloc[-20:].mean()) / 10, 3)
+            dollar_vol_50 = _sf(float(tl.iloc[-50:].mean()) / 10, 3) if len(tl) >= 50 else None
+        else:
+            dv_series     = close * vol
+            dollar_vol_20 = _sf(float(dv_series.tail(20).mean()) / 1_000_000, 3)
+            dollar_vol_50 = _sf(float(dv_series.tail(50).mean()) / 1_000_000, 3) if len(dv_series) >= 50 else None
 
         # SMA trend: is sma(N) currently trending up or down vs M bars ago?
         # sma(50) trend_dn 20  →  sma50_now < sma50_20_bars_ago  (MIO semantics)
