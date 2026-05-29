@@ -1757,7 +1757,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         vol20      = vol.tail(20).dropna()
         avg_vol_20 = int(vol20.mean()) if len(vol20) else 0
 
-        def sma(n): return _sf(close.rolling(n).mean().iloc[-1]) if len(close) >= n else None
+        def sma(n): return _sf(close.rolling(n).mean().iloc[-1], 4) if len(close) >= n else None
 
         sma5   = sma(5);  sma10 = sma(10)
         sma20  = sma(20); sma50 = sma(50); sma100 = sma(100); sma200 = sma(200)
