@@ -1821,16 +1821,23 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         sma20_trend_dn_10 = bool(sma20 is not None and sma20_10bars_ago is not None and sma20 < sma20_10bars_ago)
         sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
 
-        # !(sma(20) < sma(50))@{0..20} — strict lookback: sma20 must be ≥ sma50 for
-        # every one of the last 20 bars (MIO rejects stocks where SMA20 recently
-        # dipped below SMA50 even if it has since recovered).
+        # !(sma(A) < sma(B))@{0..N} — MIO existential lookback:
+        # Reject only if sma(A) has been CONTINUOUSLY below sma(B) for all N bars
+        # (i.e., the condition was NEVER relieved in the lookback window).
+        # Passes even if sma(A) dipped below sma(B) recently, as long as it was
+        # above at SOME POINT in the last N bars.  Matches SUNPHARMA and other stocks
+        # that are in price uptrends but whose 20-day SMA hasn't fully crossed the
+        # 50-day SMA yet.
         sma20_not_below_sma50_lookback_20 = False
         if len(sma20_series) >= 20 and len(sma50_series) >= 20:
             _t20 = sma20_series.iloc[-20:]
             _t50 = sma50_series.iloc[-20:]
             _both_valid = _t20.notna() & _t50.notna()
-            if _both_valid.all():
-                sma20_not_below_sma50_lookback_20 = bool((_t20 >= _t50).all())
+            if _both_valid.any():
+                _vt20 = _t20[_both_valid]
+                _vt50 = _t50[_both_valid]
+                # True if sma20 >= sma50 at ANY of the last 20 bars (existential)
+                sma20_not_below_sma50_lookback_20 = bool((_vt20 >= _vt50).any())
 
         # Relative volume: today's volume vs 20-day average
         rvol = _sf(float(vol.iloc[-1]) / avg_vol_20, 2) if avg_vol_20 > 0 else None
