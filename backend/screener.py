@@ -654,11 +654,12 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
     _SKIP = _re.compile(r'^exch\s*\(')   # exch(nse) — handled by exchange selector
 
     for raw in parts:
-        # !(sma(A) < sma(B))@{0..N} — MIO strict lookback: sma(A) must stay ≥ sma(B)
-        # for ALL of the last N bars.  Must be handled BEFORE the @{} strip below.
+        # !(sma(A) < sma(B))@{0..N} or @(0..N) — MIO strict lookback: sma(A) must
+        # stay ≥ sma(B) for ALL of the last N bars.  Handle BEFORE the @{} strip.
+        # MIO uses both @{...} (curly) and @(...) (round) notation interchangeably.
         _lb = _re.match(
             r'!\s*\(?\s*sma\s*\(?\s*(\d+)\s*\)?\s*<\s*sma\s*\(?\s*(\d+)\s*\)?\s*\)?\s*'
-            r'@\{\s*\d+\s*\.\.\s*(\d+)\s*\}',
+            r'@[\{\(]\s*\d+\s*\.\.\s*(\d+)\s*[\}\)]',
             raw.strip(), _re.IGNORECASE,
         )
         if _lb:
@@ -666,8 +667,8 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
             result[f'sma{a}_not_below_sma{b}_lookback_{n}'] = True
             continue   # fully handled — skip normal clause parsing
 
-        # Strip MIO lookback modifier @{N..M} for all other clauses
-        raw = _re.sub(r'@\{\s*\d+\s*\.\.\s*\d+\s*\}', '', raw)
+        # Strip MIO lookback modifier @{N..M} or @(N..M) for all other clauses
+        raw = _re.sub(r'@[\{\(]\s*\d+\s*\.\.\s*\d+\s*[\}\)]', '', raw)
 
         # Strip at most one layer of enclosing parentheses (not all)
         _r = raw.strip()

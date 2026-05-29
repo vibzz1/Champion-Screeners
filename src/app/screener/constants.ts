@@ -15,10 +15,10 @@ export const CHIPS = [
   "price > bb_upper", "price < bb_lower",
 ];
 
-export const SCREENER_LS_KEY = "mio_screeners_v7";  // bumped: advol thresholds ×10 for NSE unit fix
+export const SCREENER_LS_KEY = "mio_screeners_v8";  // bumped: d1 now matches MIO exact formula
 
 export const DEFAULTS: SavedScreener[] = [
-  { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 500 and advol(50) > 500 and sma(10) > sma(50) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d1", name: "India Setup Scan", exchange: "NSE",   formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50))@{0..20} and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d2", name: "NPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_dn 1" },
   { id: "d3", name: "PPC",             exchange: "NSE",   formula: "avg((vol * price),100) > 100000000 and avg((vol * price),20) > 100000000 and (price > sma(100) or price > sma(200)) and (pgo(50) < 4 or pgo(20) < 4) and (cvol > avol(20) * 1.5 or cvol > avol(100) * 1.5 or cvol > avol(5) * 1.5) and (atr(1) > atr(20) * 1.5 or atr(1) > atr(100) * 1.5 or atr(1) > atr(5) * 1.5) and sma(1) trend_up 1" },
   { id: "d4", name: "US Setup Scan",        exchange: "SP500", formula: "advol(20) > 200 and advol(50) > 200 and sma(10) > sma(50) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
