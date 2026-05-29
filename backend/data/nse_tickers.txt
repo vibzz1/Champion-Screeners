@@ -1,6 +1,7 @@
 # NSE EQ-series equity universe — auto-generated from EQUITY_L.csv
-# 2109 stocks · EQ series only (excludes SME/BE/BZ)
+# 2114 stocks · EQ series only (excludes SME/BE/BZ)
 # Add or remove symbols here; screener picks them up automatically.
+# Added 2026-05-29: E2E JUBLPHARMA RAINBOW STLTECH SWARAJENG (missing vs MIO May 6 ground truth)
 
 20MICRONS
 21STCENMGM
@@ -2111,3 +2112,9 @@ ZUARI
 ZUARIIND
 ZYDUSLIFE
 ZYDUSWELL
+
+E2E
+JUBLPHARMA
+RAINBOW
+STLTECH
+SWARAJENG
