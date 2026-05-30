@@ -1757,7 +1757,14 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         vol20      = vol.tail(20).dropna()
         avg_vol_20 = int(vol20.mean()) if len(vol20) else 0
 
-        def sma(n): return _sf(close.rolling(n).mean().iloc[-1], 4) if len(close) >= n else None
+        # MIO evaluates sma(N) comparisons using the PREVIOUS bar's SMA value,
+        # not today's.  This matches MIO's screener convention: the SMA is the
+        # "completed" N-bar average ending on the bar BEFORE the current candle.
+        # Using iloc[-2] (prev bar) rather than iloc[-1] (current bar) picks up
+        # ~5 extra stocks per scan that had fresh SMA crossovers on the current
+        # day — they passed MIO's prev-bar check but failed a current-bar check.
+        # price, change_pct, ATR, candle_pos still use today's close (iloc[-1]).
+        def sma(n): return _sf(close.rolling(n).mean().iloc[-2], 4) if len(close) >= n + 1 else None
 
         sma5   = sma(5);  sma10 = sma(10)
         sma20  = sma(20); sma50 = sma(50); sma100 = sma(100); sma200 = sma(200)
@@ -1803,19 +1810,20 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         # days on 75min — too short to catch stocks in multi-week downtrends.
         _T = 5 if intraday else 1          # intraday scale factor
 
+        # All SMA series use iloc[-2] (prev bar) for consistency with the sma() function above.
         sma50_series     = close.rolling(50).mean()
-        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 1)]) if len(sma50_series) >= 50 + 20*_T + 1 else None
-        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 1)]) if len(sma50_series) >= 50 + 5*_T  + 1 else None
-        # MIO semantics: trend_dn N = SMA today < SMA exactly N bars ago (pure point-to-point).
-        # No OR fallback — a 5-bar dip that recovered by day 10 is NOT trend_dn 10.
+        # trend_dn/trend_up: prev-bar SMA vs N bars before that
+        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 2)]) if len(sma50_series) >= 50 + 20*_T + 2 else None
+        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 2)]) if len(sma50_series) >= 50 + 5*_T  + 2 else None
+        # MIO semantics: trend_dn N = prev-bar SMA < SMA N bars before prev-bar.
         sma50_trend_dn_5  = bool(sma50 is not None and sma50_5bars_ago  is not None and sma50 < sma50_5bars_ago)
         sma50_trend_dn_20 = bool(sma50 is not None and sma50_20bars_ago is not None and sma50 < sma50_20bars_ago)
 
         # sma(20) trend direction — scaled lookback for intraday
         sma20_series     = close.rolling(20).mean()
-        sma20_10bars_ago = float(sma20_series.iloc[-(10*_T + 1)]) if len(sma20_series) >= 20 + 10*_T + 1 else None
-        sma20_5bars_ago  = float(sma20_series.iloc[-(5*_T  + 1)]) if len(sma20_series) >= 20 + 5*_T  + 1 else None
-        sma20_20bars_ago = float(sma20_series.iloc[-(20*_T + 1)]) if len(sma20_series) >= 20 + 20*_T + 1 else None
+        sma20_10bars_ago = float(sma20_series.iloc[-(10*_T + 2)]) if len(sma20_series) >= 20 + 10*_T + 2 else None
+        sma20_5bars_ago  = float(sma20_series.iloc[-(5*_T  + 2)]) if len(sma20_series) >= 20 + 5*_T  + 2 else None
+        sma20_20bars_ago = float(sma20_series.iloc[-(20*_T + 2)]) if len(sma20_series) >= 20 + 20*_T + 2 else None
         sma20_trend_dn_5  = bool(sma20 is not None and sma20_5bars_ago  is not None and sma20 < sma20_5bars_ago)
         sma20_trend_dn_10 = bool(sma20 is not None and sma20_10bars_ago is not None and sma20 < sma20_10bars_ago)
         sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
@@ -1824,15 +1832,16 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         # True if sma(A) was >= sma(B) at ANY point in the last N bars.
         # MIO rejects only stocks where sma(A) was CONTINUOUSLY below sma(B)
         # for the entire window — i.e. the cross never recovered at all.
+        # Use prev-bar series (exclude today) for lookback window — consistent with sma() above.
         sma20_not_below_sma50_lookback_20 = False
-        if len(sma20_series) >= 20 and len(sma50_series) >= 20:
-            _t20 = sma20_series.iloc[-20:]
-            _t50 = sma50_series.iloc[-20:]
+        if len(sma20_series) >= 21 and len(sma50_series) >= 51:
+            _t20 = sma20_series.iloc[-21:-1]  # last 20 completed bars (excl. today)
+            _t50 = sma50_series.iloc[-21:-1]
             _both_valid = _t20.notna() & _t50.notna()
             if _both_valid.any():
                 _vt20 = _t20[_both_valid]
                 _vt50 = _t50[_both_valid]
-                # True if sma20 >= sma50 at ANY of the last 20 bars (existential)
+                # True if sma20 >= sma50 at ANY of the last 20 completed bars (existential)
                 sma20_not_below_sma50_lookback_20 = bool((_vt20 >= _vt50).any())
 
         # Relative volume: today's volume vs 20-day average
