@@ -311,6 +311,186 @@ class BacktestRequest(BaseModel):
     exchange: str
     capital: float
 
+class FormulaBacktestRequest(BaseModel):
+    formula: str
+    exchange: str
+    interval: str = "1d"
+    entry_date: str        # YYYY-MM-DD — run screener on this date to find entries
+    hold_days: int = 20    # max trading bars to hold; exit at close on day hold_days
+    stop_loss_pct: float = 5.0
+    take_profit_pct: float = 10.0
+    capital: float = 100000.0
+
+@app.post("/api/backtest/formula_run")
+def run_formula_backtest(req: FormulaBacktestRequest):
+    """
+    Formula-based backtester.
+    1. Run screener on entry_date → matched tickers + entry prices.
+    2. For each ticker load post-entry OHLCV from cache.
+    3. Simulate equal-weight portfolio; exit on SL, TP, or hold_days elapsed.
+    4. Return trades list + equity curve + summary stats.
+    """
+    import pandas as pd
+    from screener import parse_formula, run_screen, _load_ohlcv_cache, _load_intraday_cache
+
+    # Parse formula (pass exchange so advol unit conversion is correct)
+    try:
+        filters = parse_formula(req.formula, exchange=req.exchange)
+    except Exception as e:
+        raise HTTPException(400, f"Formula parse error: {e}")
+
+    # Run screener for the entry date
+    try:
+        results, _ = run_screen(req.exchange, filters, as_of_date=req.entry_date, interval=req.interval)
+    except Exception as e:
+        raise HTTPException(500, f"Screener error: {e}")
+
+    if not results:
+        return {
+            "trades": [],
+            "summary": {
+                "total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                "total_return_pct": 0, "max_drawdown_pct": 0, "avg_win_pct": 0,
+                "avg_loss_pct": 0, "profit_factor": 0,
+                "entry_date": req.entry_date, "matched_count": 0,
+            },
+            "equity_curve": [{"bar": 0, "equity": round(req.capital, 2)}],
+        }
+
+    # Load full OHLCV cache for exit price computation
+    ohlcv_data = _load_ohlcv_cache(req.exchange)
+    if not ohlcv_data:
+        raise HTTPException(503, "OHLCV cache not available — run a scan first to warm the cache")
+
+    entry_ts = pd.Timestamp(req.entry_date)
+    n_stocks  = len(results)
+    per_trade = req.capital / n_stocks
+
+    trades       = []
+    equity       = req.capital
+    equity_curve = [{"bar": 0, "equity": round(equity, 2)}]
+
+    for r in results:
+        ticker      = r["ticker"]
+        entry_price = r.get("price")
+        if not entry_price or entry_price <= 0:
+            continue
+
+        df = ohlcv_data.get(ticker)
+        if df is None or df.empty:
+            continue
+
+        # Rows strictly after entry date
+        post = df[df.index > entry_ts].sort_index()
+        if post.empty:
+            # No future data — treat as open position at last known close
+            exit_price  = entry_price
+            exit_reason = "Open"
+            bars_held   = 0
+        else:
+            sl_price = entry_price * (1 - req.stop_loss_pct / 100)
+            tp_price = entry_price * (1 + req.take_profit_pct / 100)
+            exit_price  = None
+            exit_reason = "Hold"
+            bars_held   = 0
+
+            for _date, row in post.iterrows():
+                bars_held += 1
+                lo = float(row.get("Low",   row.get("low",   entry_price)))
+                hi = float(row.get("High",  row.get("high",  entry_price)))
+                cl = float(row.get("Close", row.get("close", entry_price)))
+
+                if lo <= sl_price:
+                    exit_price  = round(sl_price, 4)
+                    exit_reason = "SL"
+                    break
+                if hi >= tp_price:
+                    exit_price  = round(tp_price, 4)
+                    exit_reason = "TP"
+                    break
+                if bars_held >= req.hold_days:
+                    exit_price  = round(cl, 4)
+                    exit_reason = "Hold"
+                    break
+
+            if exit_price is None:
+                # Still open after full date range
+                last = post.iloc[-1]
+                exit_price  = round(float(last.get("Close", last.get("close", entry_price))), 4)
+                exit_reason = "Open"
+                bars_held   = len(post)
+
+        pnl_pct = round((exit_price - entry_price) / entry_price * 100, 2)
+        pnl_abs = round(per_trade * pnl_pct / 100, 2)
+        equity += pnl_abs
+        equity_curve.append({
+            "bar":    len(trades) + 1,
+            "equity": round(equity, 2),
+            "ticker": r.get("symbol", ticker),
+        })
+
+        trades.append({
+            "id":          len(trades) + 1,
+            "symbol":      r.get("symbol", ticker),
+            "entry":       round(entry_price, 2),
+            "exit":        round(exit_price, 2),
+            "pnl_pct":     pnl_pct,
+            "pnl_abs":     pnl_abs,
+            "result":      "Win" if pnl_pct > 0 else ("Loss" if pnl_pct < 0 else "BE"),
+            "bars_held":   bars_held,
+            "exit_reason": exit_reason,
+            "sector":      r.get("sector", ""),
+            "cap_size":    r.get("cap_size", ""),
+        })
+
+    if not trades:
+        return {
+            "trades": [],
+            "summary": {
+                "total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+                "total_return_pct": 0, "max_drawdown_pct": 0, "avg_win_pct": 0,
+                "avg_loss_pct": 0, "profit_factor": 0,
+                "entry_date": req.entry_date, "matched_count": n_stocks,
+            },
+            "equity_curve": equity_curve,
+        }
+
+    wins   = [t for t in trades if t["pnl_pct"] > 0]
+    losses = [t for t in trades if t["pnl_pct"] < 0]
+    n      = len(trades)
+
+    avg_win  = round(sum(t["pnl_pct"] for t in wins)   / len(wins),   2) if wins   else 0.0
+    avg_loss = round(abs(sum(t["pnl_pct"] for t in losses) / len(losses)), 2) if losses else 0.0
+    pf       = round(
+        sum(t["pnl_pct"] for t in wins) / max(abs(sum(t["pnl_pct"] for t in losses)), 0.001), 2
+    ) if wins and losses else (999.0 if wins else 0.0)
+
+    # Max drawdown from equity curve
+    peak   = req.capital
+    max_dd = 0.0
+    for pt in equity_curve:
+        peak   = max(peak, pt["equity"])
+        dd     = (peak - pt["equity"]) / peak * 100
+        max_dd = max(max_dd, dd)
+
+    return {
+        "trades": trades[:100],
+        "summary": {
+            "total_trades":    n,
+            "wins":            len(wins),
+            "losses":          len(losses),
+            "win_rate":        round(len(wins) / n * 100, 1),
+            "total_return_pct": round((equity - req.capital) / req.capital * 100, 2),
+            "max_drawdown_pct": round(max_dd, 2),
+            "avg_win_pct":     avg_win,
+            "avg_loss_pct":    avg_loss,
+            "profit_factor":   pf,
+            "entry_date":      req.entry_date,
+            "matched_count":   n_stocks,
+        },
+        "equity_curve": equity_curve,
+    }
+
 def generate_equity_curve(capital: float, n: int = 60):
     curve = []
     value = capital
@@ -419,6 +599,57 @@ def remove_stock(wl_id: int, stock_id: int, db: Session = Depends(get_db)):
     db.delete(s)
     db.commit()
     return {"ok": True}
+
+@app.get("/api/watchlists/all-symbols")
+def all_watchlist_symbols(db: Session = Depends(get_db)):
+    """Return deduplicated list of all symbols across every watchlist."""
+    rows = db.query(models.WatchlistStock.symbol).all()
+    return list({r.symbol for r in rows})
+
+@app.get("/api/screener/quotes")
+def get_quotes(symbols: str = ""):
+    """
+    Return latest price/change_pct/rsi for a comma-separated symbol list.
+    Searches every exchange's OHLCV cache; returns whichever has data first.
+    Symbols should be the base ticker without exchange suffix (e.g. RELIANCE, AAPL).
+    """
+    from screener import _load_ohlcv_cache, compute_indicators, UNIVERSES
+    import re as _re
+
+    if not symbols.strip():
+        return {}
+
+    wanted = {s.strip().upper() for s in symbols.split(",") if s.strip()}
+    result: dict = {}
+
+    # Suffix patterns to strip when matching
+    _SUFFIX = _re.compile(r'\.(NS|BO|T|KS|KQ|DE)$', _re.IGNORECASE)
+
+    for exchange in ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "XETRA"]:
+        if not (remaining := wanted - result.keys()):
+            break
+        cached = _load_ohlcv_cache(exchange)
+        if not cached:
+            continue
+        for ticker, df in cached.items():
+            base = _SUFFIX.sub("", ticker).upper()
+            if base not in remaining:
+                continue
+            try:
+                ind = compute_indicators(ticker, df, include_ohlcv=False)
+                if ind:
+                    result[base] = {
+                        "price":      ind.get("price"),
+                        "change_pct": ind.get("change_pct"),
+                        "rsi":        ind.get("rsi"),
+                        "volume":     ind.get("volume"),
+                        "ticker":     ticker,
+                        "exchange":   exchange,
+                    }
+            except Exception:
+                pass
+
+    return result
 
 # ── Portfolio ───────────────────────────────────────────────────────────────
 

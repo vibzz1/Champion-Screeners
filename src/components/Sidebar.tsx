@@ -52,6 +52,7 @@ export default function Sidebar() {
   const [activeId,   setActiveId]   = useState<string | null>(null);
   const [width,      setWidth]      = useState(DEFAULT_WIDTH);
   const [dragging,   setDragging]   = useState(false);
+  const [scanCounts, setScanCounts] = useState<Record<string, number>>({});
 
   // Load persisted width on mount
   useEffect(() => {
@@ -69,11 +70,17 @@ export default function Sidebar() {
     function onActive(e: Event) {
       setActiveId((e as CustomEvent<{ id: string }>).detail.id);
     }
+    function onResults(e: Event) {
+      const { id, count } = (e as CustomEvent<{ id: string; count: number }>).detail;
+      setScanCounts(prev => ({ ...prev, [id]: count }));
+    }
     window.addEventListener("mio:screeners-changed", onChanged);
     window.addEventListener("mio:scan-active",       onActive);
+    window.addEventListener("mio:scan-results",      onResults);
     return () => {
       window.removeEventListener("mio:screeners-changed", onChanged);
       window.removeEventListener("mio:scan-active",       onActive);
+      window.removeEventListener("mio:scan-results",      onResults);
     };
   }, [refresh]);
 
@@ -207,9 +214,18 @@ export default function Sidebar() {
                       <button onClick={() => handleRun(s)}
                         className="flex-1 text-left px-2 py-1.5 min-w-0" title={s.formula}>
                         {/* ↑ Scanner name: increased to 12px */}
-                        <div className="font-semibold truncate text-[12px]"
+                        <div className="font-semibold truncate text-[12px] flex items-center gap-1"
                           style={{ color: isActive ? ACTIVE_C : TEXT_LT }}>
-                          {s.name}
+                          <span className="truncate">{s.name}</span>
+                          {scanCounts[s.id] != null && (
+                            <span className="shrink-0 text-[9px] px-1 rounded font-bold tabular-nums"
+                              style={{
+                                backgroundColor: isActive ? "rgba(96,165,250,0.25)" : "rgba(255,255,255,0.1)",
+                                color: isActive ? ACTIVE_C : TEXT_DIM,
+                              }}>
+                              {scanCounts[s.id]}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[9px] font-semibold px-1 rounded"

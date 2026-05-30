@@ -1,39 +1,51 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface Watchlist { id: number; name: string }
 interface Stock { id: number; symbol: string; added_at: string }
+interface Quote { price: number | null; change_pct: number | null; rsi: number | null; exchange: string }
 
 export default function WatchlistsPage() {
-  const [lists, setLists] = useState<Watchlist[]>([]);
-  const [selected, setSelected] = useState<Watchlist | null>(null);
-  const [stocks, setStocks] = useState<Stock[]>([]);
-  const [newList, setNewList] = useState("");
-  const [newSymbol, setNewSymbol] = useState("");
-  const [error, setError] = useState("");
+  const [lists,      setLists]      = useState<Watchlist[]>([]);
+  const [selected,   setSelected]   = useState<Watchlist | null>(null);
+  const [stocks,     setStocks]     = useState<Stock[]>([]);
+  const [quotes,     setQuotes]     = useState<Record<string, Quote>>({});
+  const [newList,    setNewList]    = useState("");
+  const [newSymbol,  setNewSymbol]  = useState("");
+  const [error,      setError]      = useState("");
+  const [loadingQ,   setLoadingQ]   = useState(false);
 
   async function loadLists() {
     try {
       const r = await fetch(`${API}/api/watchlists`);
       const data = await r.json();
       setLists(data);
-      if (data.length && !selected) {
-        setSelected(data[0]);
-      }
-    } catch {
-      setError("Cannot connect to backend.");
-    }
+      if (data.length && !selected) setSelected(data[0]);
+    } catch { setError("Cannot connect to backend."); }
   }
+
+  const fetchQuotes = useCallback(async (syms: string[]) => {
+    if (!syms.length) return;
+    setLoadingQ(true);
+    try {
+      const r = await fetch(`${API}/api/screener/quotes?symbols=${encodeURIComponent(syms.join(","))}`);
+      if (r.ok) setQuotes(await r.json());
+    } catch {}
+    finally { setLoadingQ(false); }
+  }, []);
 
   async function loadStocks(wl: Watchlist) {
     const r = await fetch(`${API}/api/watchlists/${wl.id}/stocks`);
-    setStocks(await r.json());
+    const data: Stock[] = await r.json();
+    setStocks(data);
+    setQuotes({});
+    fetchQuotes(data.map(s => s.symbol));
   }
 
-  useEffect(() => { loadLists(); }, []);
-  useEffect(() => { if (selected) loadStocks(selected); }, [selected]);
+  useEffect(() => { loadLists(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (selected) loadStocks(selected); }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function createList() {
     if (!newList.trim()) return;
@@ -48,7 +60,7 @@ export default function WatchlistsPage() {
 
   async function deleteList(wl: Watchlist) {
     await fetch(`${API}/api/watchlists/${wl.id}`, { method: "DELETE" });
-    if (selected?.id === wl.id) { setSelected(null); setStocks([]); }
+    if (selected?.id === wl.id) { setSelected(null); setStocks([]); setQuotes({}); }
     await loadLists();
   }
 
@@ -69,105 +81,148 @@ export default function WatchlistsPage() {
     loadStocks(selected);
   }
 
+  const totalPnl = stocks.length
+    ? stocks.reduce((sum, s) => sum + (quotes[s.symbol]?.change_pct ?? 0), 0) / stocks.length
+    : null;
+
   return (
     <div>
       <h2 className="text-lg font-bold mb-3" style={{ color: "#003366" }}>Watch Lists</h2>
       {error && <p className="text-red-600 text-xs mb-2">{error}</p>}
 
       <div className="flex gap-4">
-        {/* Left: list panel */}
-        <div className="w-48 shrink-0">
-          <div className="border border-gray-300 rounded overflow-hidden mb-2">
-            <div className="text-[11px] font-bold text-white px-2 py-1" style={{ backgroundColor: "#003366" }}>
+        {/* ── Left: list panel ─────────────────────────────────────────── */}
+        <div className="w-52 shrink-0">
+          <div className="border border-gray-200 rounded-lg overflow-hidden mb-2 shadow-sm">
+            <div className="text-[11px] font-bold text-white px-3 py-1.5" style={{ backgroundColor: "#003366" }}>
               My Watch Lists
             </div>
             {lists.length === 0 && (
-              <div className="px-2 py-2 text-xs text-gray-500">No lists yet.</div>
+              <div className="px-3 py-3 text-xs text-gray-400">No lists yet.</div>
             )}
-            {lists.map((wl) => (
-              <div
-                key={wl.id}
-                className="flex items-center justify-between px-2 py-1 hover:bg-blue-50 cursor-pointer text-xs"
-                style={{ backgroundColor: selected?.id === wl.id ? "#e8f0fe" : undefined }}
-                onClick={() => setSelected(wl)}
-              >
-                <span style={{ color: "#003399", fontWeight: selected?.id === wl.id ? "bold" : "normal" }}>
+            {lists.map(wl => (
+              <div key={wl.id}
+                className="flex items-center justify-between px-3 py-1.5 cursor-pointer text-xs border-b border-gray-100 last:border-0 transition-colors"
+                style={{ backgroundColor: selected?.id === wl.id ? "#eff6ff" : undefined }}
+                onClick={() => setSelected(wl)}>
+                <span style={{ color: "#003399", fontWeight: selected?.id === wl.id ? 600 : 400 }}>
                   {wl.name}
                 </span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteList(wl); }}
-                  className="text-red-400 hover:text-red-600 ml-1"
-                >×</button>
+                <button onClick={e => { e.stopPropagation(); deleteList(wl); }}
+                  className="text-gray-300 hover:text-red-500 transition-colors ml-1 text-base leading-none">×</button>
               </div>
             ))}
           </div>
-          {/* Create new list */}
           <div className="flex gap-1">
             <input
-              className="border border-gray-300 rounded px-2 py-1 text-xs flex-1 min-w-0"
+              className="border border-gray-200 rounded px-2 py-1 text-xs flex-1 min-w-0 focus:outline-none focus:border-blue-400"
               placeholder="New list name"
               value={newList}
-              onChange={(e) => setNewList(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createList()}
+              onChange={e => setNewList(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && createList()}
             />
-            <button
-              onClick={createList}
-              className="px-2 py-1 text-xs text-white rounded"
-              style={{ backgroundColor: "#003366" }}
-            >+</button>
+            <button onClick={createList}
+              className="px-2.5 py-1 text-xs text-white rounded font-semibold"
+              style={{ backgroundColor: "#003366" }}>+</button>
           </div>
         </div>
 
-        {/* Right: stocks panel */}
+        {/* ── Right: stocks panel ──────────────────────────────────────── */}
         <div className="flex-1">
           {!selected ? (
-            <div className="text-xs text-gray-500 mt-4">Select or create a watch list.</div>
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+              <div className="text-3xl mb-2">☆</div>
+              <div className="text-sm">Select or create a watch list</div>
+            </div>
           ) : (
-            <div className="border border-gray-300 rounded overflow-hidden">
-              <div className="text-[11px] font-bold text-white px-2 py-1 flex items-center justify-between" style={{ backgroundColor: "#003366" }}>
-                <span>{selected.name}</span>
-                <span>{stocks.length} stocks</span>
+            <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
+              {/* Header */}
+              <div className="flex items-center justify-between px-3 py-2 text-white text-xs" style={{ backgroundColor: "#003366" }}>
+                <span className="font-bold">{selected.name}</span>
+                <div className="flex items-center gap-3">
+                  {totalPnl !== null && (
+                    <span className="font-semibold tabular-nums"
+                      style={{ color: totalPnl >= 0 ? "#86efac" : "#fca5a5" }}>
+                      avg {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(2)}% today
+                    </span>
+                  )}
+                  <span className="text-white/60">{stocks.length} stocks</span>
+                  {loadingQ && <span className="text-white/50 text-[10px]">loading prices…</span>}
+                </div>
               </div>
 
               {/* Add stock */}
-              <div className="flex gap-2 p-2 border-b border-gray-200 bg-[#f8fbff]">
+              <div className="flex gap-2 p-2 border-b border-gray-100 bg-slate-50">
                 <input
-                  className="border border-gray-300 rounded px-2 py-1 text-xs w-32"
-                  placeholder="Symbol (e.g. AAPL)"
+                  className="border border-gray-200 rounded px-2 py-1 text-xs w-36 focus:outline-none focus:border-blue-400"
+                  placeholder="Symbol (e.g. RELIANCE)"
                   value={newSymbol}
-                  onChange={(e) => setNewSymbol(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addStock()}
+                  onChange={e => setNewSymbol(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && addStock()}
                 />
-                <button
-                  onClick={addStock}
-                  className="px-3 py-1 text-xs text-white rounded"
-                  style={{ backgroundColor: "#003366" }}
-                >Add Symbol</button>
+                <button onClick={addStock}
+                  className="px-3 py-1 text-xs text-white rounded font-semibold"
+                  style={{ backgroundColor: "#003366" }}>
+                  + Add
+                </button>
+                <button onClick={() => selected && loadStocks(selected)}
+                  title="Refresh prices"
+                  className="px-2.5 py-1 text-xs border border-gray-200 rounded text-gray-500 hover:bg-gray-100 transition-colors">
+                  ↺
+                </button>
               </div>
 
               {stocks.length === 0 ? (
-                <div className="px-3 py-4 text-xs text-gray-500">No symbols in this list.</div>
+                <div className="px-3 py-6 text-xs text-gray-400 text-center">
+                  No symbols yet — add one above.
+                </div>
               ) : (
                 <table className="w-full text-xs border-collapse">
                   <thead>
-                    <tr className="bg-gray-100 text-left">
-                      <th className="border border-gray-200 px-2 py-1">Symbol</th>
-                      <th className="border border-gray-200 px-2 py-1">Date Added</th>
-                      <th className="border border-gray-200 px-2 py-1 w-12">Remove</th>
+                    <tr className="bg-gray-50 text-left text-[11px] text-gray-500 font-semibold border-b border-gray-200">
+                      <th className="px-3 py-1.5">Symbol</th>
+                      <th className="px-3 py-1.5 text-right">Price</th>
+                      <th className="px-3 py-1.5 text-right">Chg %</th>
+                      <th className="px-3 py-1.5 text-right">RSI</th>
+                      <th className="px-3 py-1.5 text-gray-400">Exchange</th>
+                      <th className="px-3 py-1.5 text-gray-400">Added</th>
+                      <th className="px-1 py-1.5 w-8"/>
                     </tr>
                   </thead>
                   <tbody>
-                    {stocks.map((s) => (
-                      <tr key={s.id} className="hover:bg-gray-50">
-                        <td className="border border-gray-200 px-2 py-1 font-semibold" style={{ color: "#003399" }}>{s.symbol}</td>
-                        <td className="border border-gray-200 px-2 py-1 text-gray-500">
-                          {new Date(s.added_at).toLocaleDateString()}
-                        </td>
-                        <td className="border border-gray-200 px-2 py-1 text-center">
-                          <button onClick={() => removeStock(s.id)} className="text-red-400 hover:text-red-600">×</button>
-                        </td>
-                      </tr>
-                    ))}
+                    {stocks.map(s => {
+                      const q = quotes[s.symbol];
+                      const up = (q?.change_pct ?? 0) >= 0;
+                      const rsiCol = !q?.rsi ? "#aaa" : q.rsi > 70 ? "#dc2626" : q.rsi < 30 ? "#16a34a" : "#374151";
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50 border-b border-gray-100 last:border-0 transition-colors">
+                          <td className="px-3 py-1.5 font-bold" style={{ color: "#003399" }}>{s.symbol}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-gray-700">
+                            {q?.price != null ? q.price.toLocaleString() : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold"
+                            style={{ color: q?.change_pct != null ? (up ? "#16a34a" : "#dc2626") : "#d1d5db" }}>
+                            {q?.change_pct != null ? `${up ? "+" : ""}${q.change_pct}%` : "—"}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {q?.rsi != null
+                              ? <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                  style={{ color: rsiCol, backgroundColor: q.rsi > 70 ? "#fee2e2" : q.rsi < 30 ? "#dcfce7" : "#f3f4f6" }}>
+                                  {q.rsi}
+                                </span>
+                              : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-gray-400 text-[10px]">{q?.exchange ?? "—"}</td>
+                          <td className="px-3 py-1.5 text-gray-400">
+                            {new Date(s.added_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                          </td>
+                          <td className="px-1 py-1.5 text-center">
+                            <button onClick={() => removeStock(s.id)}
+                              className="text-gray-300 hover:text-red-500 transition-colors text-base leading-none">×</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}

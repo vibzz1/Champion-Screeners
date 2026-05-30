@@ -10,11 +10,41 @@ import { Sparkline }         from "./Sparkline";
 import { FormulaEditor }     from "./FormulaEditor";
 import { ScanProgress }      from "./ScanProgress";
 
-const API     = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const LS_KEY = SCREENER_LS_KEY;
+const API           = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const LS_KEY        = SCREENER_LS_KEY;
+const LAST_SCAN_KEY = "mio_last_scan_v2";
+
+// ── Column definitions (outside component to avoid recreation) ─────────────
+const COL_LS = "mio_cols_v2";
+const FIXED_COL_IDS = new Set(["fav","idx","symbol","chart"]);
+
+const ALL_COLS = [
+  { id: "fav",      label: "★",        sortKey: "",                  defW: 28,  noSort: true,  noResize: true  },
+  { id: "idx",      label: "#",        sortKey: "",                  defW: 32,  noSort: true,  noResize: true  },
+  { id: "symbol",   label: "Symbol",   sortKey: "symbol",            defW: 90,  noSort: false, noResize: false },
+  { id: "name",     label: "Company",  sortKey: "name",              defW: 140, noSort: false, noResize: false },
+  { id: "sector",   label: "Sector",   sortKey: "sector",            defW: 90,  noSort: false, noResize: false },
+  { id: "industry", label: "Industry", sortKey: "industry",          defW: 100, noSort: false, noResize: false },
+  { id: "cap",      label: "Cap",      sortKey: "cap_size",          defW: 55,  noSort: false, noResize: false },
+  { id: "mktcap",   label: "Mkt Cap",  sortKey: "market_cap",        defW: 70,  noSort: false, noResize: false },
+  { id: "price",    label: "Price",    sortKey: "price",             defW: 65,  noSort: false, noResize: false },
+  { id: "chg",      label: "Chg %",    sortKey: "change_pct",        defW: 60,  noSort: false, noResize: false },
+  { id: "earnings", label: "Earnings", sortKey: "",                  defW: 65,  noSort: true,  noResize: false },
+  { id: "volume",   label: "Volume",   sortKey: "volume",            defW: 75,  noSort: false, noResize: false },
+  { id: "rsi",      label: "RSI",      sortKey: "rsi",               defW: 50,  noSort: false, noResize: false },
+  { id: "macd",     label: "MACD",     sortKey: "macd_bullish",      defW: 70,  noSort: false, noResize: false },
+  { id: "sma20",    label: "SMA20",    sortKey: "sma20",             defW: 60,  noSort: false, noResize: false },
+  { id: "sma50",    label: "SMA50",    sortKey: "sma50",             defW: 60,  noSort: false, noResize: false },
+  { id: "sma200",   label: "SMA200",   sortKey: "sma200",            defW: 65,  noSort: false, noResize: false },
+  { id: "h52",      label: "% 52H",    sortKey: "pct_from_52w_high", defW: 55,  noSort: false, noResize: false },
+  { id: "days",     label: "Days",     sortKey: "",                  defW: 45,  noSort: true,  noResize: false },
+  { id: "chart",    label: "Chart",    sortKey: "",                  defW: 65,  noSort: true,  noResize: true  },
+] as const;
+type ColId = typeof ALL_COLS[number]["id"];
+const ALL_COL_IDS: ColId[] = ALL_COLS.map(c => c.id);
+const DEFAULT_HIDDEN: ColId[] = ["industry", "sma200"];
 
 // ── Fetch with exponential-backoff retry ─────────────────────────────────────
-// Retries on network errors and 5xx responses; never retries 4xx (client errors).
 async function fetchWithRetry(
   url: string,
   opts: RequestInit,
@@ -25,13 +55,13 @@ async function fetchWithRetry(
     try {
       const res = await fetch(url, opts);
       if (res.ok) return res;
-      if (res.status >= 400 && res.status < 500) return res; // 4xx — not retryable
+      if (res.status >= 400 && res.status < 500) return res;
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (e) {
       lastErr = e;
     }
     if (attempt < maxRetries) {
-      const delay = 1000 * Math.pow(2, attempt); // 1s, 2s
+      const delay = 1000 * Math.pow(2, attempt);
       console.warn(`[MIO] fetch attempt ${attempt + 1} failed — retrying in ${delay}ms`, lastErr);
       await new Promise<void>(r => setTimeout(r, delay));
     }
@@ -55,7 +85,7 @@ export default function ScreenerPage() {
   const [active, setActive]         = useState<SavedScreener | null>(null);
   const [results, setResults]       = useState<Result[]>([]);
   const [loading, setLoading]       = useState(false);
-  const [masterZoom, setMasterZoom] = useState(69); // shared bars-visible for all charts
+  const [masterZoom, setMasterZoom] = useState(69);
   const [error, setError]           = useState("");
   const [warning, setWarning]       = useState("");
   const [view, setView]             = useState<"overview"|"charts">("overview");
@@ -72,8 +102,8 @@ export default function ScreenerPage() {
   const [favView, setFavView]        = useState<"overview"|"charts">("overview");
   const [earnings, setEarnings]      = useState<Record<string, string>>({});
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-  const [tick, setTick]                   = useState(0); // increments every 60s for staleness re-render
-  const [prevTickerSet, setPrevTS]        = useState<Set<string> | null>(null); // null = no history yet
+  const [tick, setTick]                   = useState(0);
+  const [prevTickerSet, setPrevTS]        = useState<Set<string> | null>(null);
   const [scanDiff, setScanDiff]           = useState<{prevCount:number;newCount:number;droppedCount:number;prevDate:string}|null>(null);
   const [jumpToTicker, setJumpToTicker]   = useState<string | null>(null);
   const [scanProgress, setScanProgress]   = useState<{phase:string;done:number;total:number;exchange:string;bar_min:number}|null>(null);
@@ -82,16 +112,107 @@ export default function ScreenerPage() {
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
   const [recentScreeners, setRecent] = useState<SavedScreener[]>([]);
-  const [scanDuration,   setScanDuration] = useState<number | null>(null);
+  const [scanDuration, setScanDuration] = useState<number | null>(null);
+  const [restored,     setRestored]     = useState(false); // true when showing cached last-scan
+  const [watchlistSyms, setWatchlistSyms] = useState<Set<string>>(new Set());
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
 
+  // ── Column customizer state ────────────────────────────────────────────────
+  const [colOrder,    setColOrder]    = useState<ColId[]>(ALL_COL_IDS);
+  const [hiddenCols,  setHiddenCols]  = useState<Set<ColId>>(new Set(DEFAULT_HIDDEN));
+  const [colWidths,   setColWidths]   = useState<Partial<Record<ColId, number>>>({});
+  const [showColMenu, setShowColMenu] = useState(false);
+  const [dragCol,     setDragCol]     = useState<ColId | null>(null);
+  const [dropCol,     setDropCol]     = useState<ColId | null>(null);
+
+  // Load column prefs from localStorage
+  useEffect(() => {
+    try {
+      const o = localStorage.getItem(COL_LS + "_order");
+      if (o) {
+        const parsed: ColId[] = JSON.parse(o);
+        // Ensure any new columns are appended and removed ones are filtered
+        const preserved = parsed.filter(id => ALL_COL_IDS.includes(id));
+        const added     = ALL_COL_IDS.filter(id => !parsed.includes(id));
+        setColOrder([...preserved, ...added]);
+      }
+      const h = localStorage.getItem(COL_LS + "_hidden");
+      if (h) setHiddenCols(new Set(JSON.parse(h)));
+      const w = localStorage.getItem(COL_LS + "_widths");
+      if (w) setColWidths(JSON.parse(w));
+    } catch {}
+  }, []);
+
+  function saveColOrder(order: ColId[]) {
+    setColOrder(order);
+    try { localStorage.setItem(COL_LS + "_order", JSON.stringify(order)); } catch {}
+  }
+  function saveHiddenCols(hidden: Set<ColId>) {
+    setHiddenCols(hidden);
+    try { localStorage.setItem(COL_LS + "_hidden", JSON.stringify([...hidden])); } catch {}
+  }
+  function saveColWidths(widths: Partial<Record<ColId, number>>) {
+    setColWidths(widths);
+    try { localStorage.setItem(COL_LS + "_widths", JSON.stringify(widths)); } catch {}
+  }
+
+  function toggleHidden(id: ColId) {
+    if (FIXED_COL_IDS.has(id)) return;
+    const next = new Set(hiddenCols);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    saveHiddenCols(next);
+  }
+
+  const visibleCols = useMemo(
+    () => colOrder.filter(id => !hiddenCols.has(id)),
+    [colOrder, hiddenCols],
+  );
+
+  // Drag-to-reorder handlers
+  function onColDragStart(id: ColId) { setDragCol(id); }
+  function onColDragOver(e: React.DragEvent, id: ColId) {
+    e.preventDefault();
+    if (dragCol && dragCol !== id) setDropCol(id);
+  }
+  function onColDrop(targetId: ColId) {
+    if (!dragCol || dragCol === targetId) return;
+    const next = [...colOrder];
+    const fi   = next.indexOf(dragCol);
+    const ti   = next.indexOf(targetId);
+    if (fi < 0 || ti < 0) return;
+    next.splice(fi, 1);
+    next.splice(ti, 0, dragCol);
+    saveColOrder(next);
+    setDragCol(null);
+    setDropCol(null);
+  }
+  function onColDragEnd() { setDragCol(null); setDropCol(null); }
+
+  // Column resize
+  function startColResize(e: React.MouseEvent, id: ColId, currentWidth: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX  = e.clientX;
+    const startW  = currentWidth;
+    document.body.classList.add("col-resize-active");
+    function onMove(ev: MouseEvent) {
+      const next = Math.max(40, startW + ev.clientX - startX);
+      setColWidths(prev => ({ ...prev, [id]: next }));
+    }
+    function onUp(ev: MouseEvent) {
+      const final = Math.max(40, startW + ev.clientX - startX);
+      saveColWidths({ ...colWidths, [id]: final });
+      document.body.classList.remove("col-resize-active");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup",   onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
+  }
+
   // ── Persistence ──────────────────────────────────────────────────────────
-  // Built-ins are seeded from DEFAULTS in code but can be overridden by the user.
-  // When a built-in is edited and saved, the user's version is stored in localStorage
-  // and takes priority over the code default on next load.
-  // New built-ins added in code appear fresh only for users who haven't customised them.
   const DEFAULT_IDS = new Set(DEFAULTS.map(d => d.id));
 
   useEffect(() => {
@@ -99,10 +220,8 @@ export default function ScreenerPage() {
       const raw = localStorage.getItem(LS_KEY);
       const saved: SavedScreener[] = raw ? JSON.parse(raw) : [];
       const savedMap = new Map(saved.map(s => [s.id, s]));
-      // Built-ins: use user's saved version if they've edited it, else code default
       const builtins = DEFAULTS.map(d => savedMap.get(d.id) ?? d);
-      // Custom: any saved screener not in DEFAULTS
-      const custom = saved.filter(s => !DEFAULT_IDS.has(s.id));
+      const custom   = saved.filter(s => !DEFAULT_IDS.has(s.id));
       setScreeners([...builtins, ...custom]);
     } catch { setScreeners(DEFAULTS); }
   }, []);
@@ -116,6 +235,30 @@ export default function ScreenerPage() {
 
   useEffect(() => { setRecent(getRecentScreeners()); }, []);
 
+  // Restore last scan from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_SCAN_KEY);
+      if (!raw) return;
+      const { screener, results, asOfDate: savedDate, timestamp } = JSON.parse(raw);
+      if (screener && Array.isArray(results) && results.length > 0) {
+        setActive(screener);
+        setResults(results);
+        if (savedDate) setAsOfDate(savedDate);
+        setLastRefreshed(new Date(timestamp));
+        setRestored(true);
+      }
+    } catch {}
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load all watchlist symbols for badge display
+  useEffect(() => {
+    fetch(`${API}/api/watchlists/all-symbols`)
+      .then(r => r.ok ? r.json() : [])
+      .then((syms: string[]) => setWatchlistSyms(new Set(syms)))
+      .catch(() => {});
+  }, []);
+
   function toggleFavorite(r: Result) {
     setFavorites(prev => {
       const next = { ...prev };
@@ -128,13 +271,11 @@ export default function ScreenerPage() {
 
   function persist(list: SavedScreener[]) {
     setScreeners(list);
-    // Save all screeners — built-ins that differ from code defaults are stored
-    // so user edits (e.g. changing advol from 50→100) survive page reloads.
     const defaultsMap = new Map(DEFAULTS.map(d => [d.id, d]));
     const toSave = list.filter(s => {
       const def = defaultsMap.get(s.id);
-      if (!def) return true; // user-created — always save
-      return JSON.stringify(s) !== JSON.stringify(def); // built-in — save only if changed
+      if (!def) return true;
+      return JSON.stringify(s) !== JSON.stringify(def);
     });
     localStorage.setItem(LS_KEY, JSON.stringify(toSave));
   }
@@ -180,20 +321,33 @@ export default function ScreenerPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setResults(data.results ?? []);
+      const scanResults: Result[] = data.results ?? [];
+      setResults(scanResults);
       setIsLive(data.live ?? false);
       setLastRefreshed(new Date());
-      emit("mio:scan-active", { id: s.id });
+      setRestored(false);
+      emit("mio:scan-active",   { id: s.id });
+      emit("mio:scan-results",  { id: s.id, count: scanResults.length });
+      // Persist last scan so page refresh restores results instantly
+      try {
+        const payload = JSON.stringify({ screener: s, results: scanResults, asOfDate: histDate, timestamp: Date.now() });
+        localStorage.setItem(LAST_SCAN_KEY, payload);
+      } catch {
+        // If quota exceeded, save without ohlcv (strips chart data but keeps table)
+        try {
+          const stripped = scanResults.map(({ ohlcv: _o, ...r }) => ({ ...r, ohlcv: [] }));
+          localStorage.setItem(LAST_SCAN_KEY, JSON.stringify({ screener: s, results: stripped, asOfDate: histDate, timestamp: Date.now() }));
+        } catch {}
+      }
       saveRecentScreener(s);
       setRecent(getRecentScreeners());
       if (data.warning) setWarning(data.warning);
-      // ── Scan history: only for live scans (not historical as_of_date) ──────
       if (!histDate) {
         const _d = new Date(); const today = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
         const todayTickers: string[] = (data.results ?? []).map((r: Result) => r.ticker);
         const hist = getScanHistory(s.id);
         const prevDate = Object.keys(hist).filter(k => k < today).sort().pop();
-        const prevSet = prevDate ? new Set<string>(hist[prevDate]) : null;
+        const prevSet  = prevDate ? new Set<string>(hist[prevDate]) : null;
         setPrevTS(prevSet);
         if (prevSet && todayTickers.length > 0) {
           const currSet = new Set(todayTickers);
@@ -252,16 +406,16 @@ export default function ScreenerPage() {
     };
   }, [asOfDate, runScreen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-
   // ── CSV export ───────────────────────────────────────────────────────────
   function exportCSV() {
-    const headers = ["Symbol","Name","Sector","Industry","Cap","Market Cap","Price","Chg%","Volume","RSI","MACD","SMA20","SMA50","SMA200","% 52H"];
+    const headers = ["Symbol","Name","Sector","Industry","Cap","Market Cap","Price","Chg%","Volume","RSI","MACD","SMA20","SMA50","SMA200","% 52H","DaysInScan"];
     const rows = displayResults.map(r => [
       r.symbol, r.name, r.sector, r.industry, r.cap_size,
       fmtCap(r.market_cap, active?.exchange ?? "NSE"),
       r.price, r.change_pct, r.volume, r.rsi,
       r.macd_bullish ? "Bull" : "Bear",
       r.sma20, r.sma50, r.sma200, r.pct_from_52w_high,
+      daysInScanMap[r.ticker] ?? 1,
     ]);
     const csv = [headers, ...rows].map(row => row.map(v => `"${v ?? ""}"`).join(",")).join("\n");
     const a = document.createElement("a");
@@ -277,15 +431,21 @@ export default function ScreenerPage() {
     function onKey(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-      if (e.key === "Escape" && editing) { setEditing(null); return; }
+      if (e.key === "Escape") {
+        if (showColMenu) { setShowColMenu(false); return; }
+        if (editing) { setEditing(null); return; }
+      }
       if (e.key === "/" && !inInput) {
         e.preventDefault();
         document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
       }
+      if ((e.key === "r" || e.key === "R") && !inInput && !e.metaKey && !e.ctrlKey) {
+        if (active && !loading) runScreen(active, asOfDate);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editing]);
+  }, [editing, showColMenu]);
 
   // ── Sort / filter ─────────────────────────────────────────────────────────
   function handleSort(k: string) {
@@ -318,17 +478,34 @@ export default function ScreenerPage() {
   useEffect(()=>{setPage(1);},[sectorFilter,capFilter,sortKey,sortDir,pageSize,resultSearch]);
   useEffect(()=>{setPage(1);},[showFavorites]);
 
-  // Sector summary counts from full filtered set (not paged)
+  // Sector summary counts
   const sectorCounts = useMemo(()=>{
     const m: Record<string,number> = {};
     displayResults.forEach(r=>{ if(r.sector) m[r.sector]=(m[r.sector]||0)+1; });
     return Object.entries(m).sort((a,b)=>b[1]-a[1]);
   },[displayResults]);
+
+  // ── Days in scan map (consecutive days per ticker) ─────────────────────
+  const daysInScanMap = useMemo<Record<string, number>>(() => {
+    if (!active) return {};
+    const hist  = getScanHistory(active.id);
+    const dates = Object.keys(hist).sort().reverse(); // newest first
+    if (dates.length === 0) return {};
+    const map: Record<string, number> = {};
+    for (const r of results) {
+      let streak = 0;
+      for (const d of dates) {
+        if ((hist[d] ?? []).includes(r.ticker)) streak++;
+        else break;
+      }
+      if (streak > 0) map[r.ticker] = streak;
+    }
+    return map;
+  }, [active, results]);
+
   function goToPage(p: number) {
     (document.activeElement as HTMLElement)?.blur();
     setPage(p);
-    // Double rAF: wait for React to commit + browser scroll-anchoring to settle,
-    // then force scroll to top. This reliably overrides Chrome's scroll anchoring.
     requestAnimationFrame(() => requestAnimationFrame(() => {
       window.scrollTo(0, 0);
       if (resultsRef.current) resultsRef.current.scrollTop = 0;
@@ -347,7 +524,7 @@ export default function ScreenerPage() {
     return () => clearInterval(id);
   }, [loading]);
 
-  // Jump to a specific chart card when navigating from table → charts view
+  // Jump to chart card
   useEffect(() => {
     if (!jumpToTicker || view !== "charts") return;
     const t = setTimeout(() => {
@@ -357,17 +534,17 @@ export default function ScreenerPage() {
     return () => clearTimeout(t);
   }, [jumpToTicker, view]);
 
-  // Tick every 60s so staleness badge re-computes without a full re-fetch
+  // Tick every 60s for staleness re-render
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 60_000);
     return () => clearInterval(id);
   }, []);
 
-  const favResults   = useMemo(()=>Object.values(favorites),[favorites]);
+  const favResults    = useMemo(()=>Object.values(favorites),[favorites]);
   const favTotalPages = Math.max(1, Math.ceil(favResults.length/pageSize));
-  const favPaged     = favResults.slice((page-1)*pageSize, page*pageSize);
+  const favPaged      = favResults.slice((page-1)*pageSize, page*pageSize);
 
-  // Earnings — fetch from NSE for the current visible page only
+  // Earnings — fetch for current visible page only
   const pagedTickers = useMemo(
     ()=>(showFavorites ? favPaged : paged).map(r=>r.ticker).join(","),
     [showFavorites, favPaged, paged]
@@ -380,22 +557,204 @@ export default function ScreenerPage() {
       .catch(()=>{});
   },[pagedTickers]);
 
-  function TH({label,k}:{label:string;k:string}) {
-    const on=sortKey===k;
-    return <th onClick={()=>handleSort(k)}
-      className="px-2 py-1.5 cursor-pointer select-none whitespace-nowrap hover:bg-blue-100 text-left font-semibold text-[11px] transition-colors"
-      style={{
-        backgroundColor: on ? "#dbeafe" : undefined,
-        color:           on ? "#1d4ed8" : "#4b5563",
-        boxShadow:       on ? "inset 0 -2px 0 #3b82f6" : undefined,
-      }}>
-      {label}
-      <span className="ml-1" style={{color:on?"#2563eb":"#cbd5e1",fontSize:"9px"}}>
-        {on?(sortDir==="asc"?"▲":"▼"):"↕"}
-      </span>
-    </th>;
+  // ── Column header component (enhanced with drag/resize) ──────────────────
+  function ColTH({ id, defW }: { id: ColId; defW: number }) {
+    const def     = ALL_COLS.find(c => c.id === id)!;
+    const isSort  = sortKey === def.sortKey && def.sortKey;
+    const w       = colWidths[id] ?? defW;
+    const isFixed = FIXED_COL_IDS.has(id);
+    const isDragging = dragCol === id;
+    const isDropTarget = dropCol === id && dragCol !== id;
+
+    return (
+      <th
+        draggable={!isFixed}
+        onDragStart={isFixed ? undefined : () => onColDragStart(id)}
+        onDragOver={isFixed ? undefined : (e) => onColDragOver(e, id)}
+        onDrop={isFixed ? undefined : () => onColDrop(id)}
+        onDragEnd={isFixed ? undefined : onColDragEnd}
+        onClick={def.sortKey && !def.noSort ? () => handleSort(def.sortKey!) : undefined}
+        style={{
+          width:           w,
+          minWidth:        w,
+          maxWidth:        w,
+          backgroundColor: isSort ? "#dbeafe" : undefined,
+          color:           isSort ? "#1d4ed8" : "#4b5563",
+          boxShadow:       isSort ? "inset 0 -2px 0 #3b82f6" : undefined,
+          opacity:         isDragging ? 0.4 : 1,
+          borderLeft:      isDropTarget ? "2px solid #3b82f6" : undefined,
+          cursor:          def.sortKey && !def.noSort ? "pointer" : (isFixed ? "default" : "grab"),
+          position:        "relative",
+          overflow:        "hidden",
+          userSelect:      "none",
+        }}
+        className="px-2 py-1.5 select-none whitespace-nowrap text-left font-semibold text-[11px] transition-colors hover:bg-blue-50"
+      >
+        {def.label}
+        {def.sortKey && !def.noSort && (
+          <span className="ml-1" style={{ color: isSort ? "#2563eb" : "#cbd5e1", fontSize: "9px" }}>
+            {isSort ? (sortDir==="asc" ? "▲" : "▼") : "↕"}
+          </span>
+        )}
+        {/* Resize handle */}
+        {!def.noResize && (
+          <div
+            onMouseDown={(e) => startColResize(e, id, w)}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to resize"
+            style={{
+              position:   "absolute", top: 0, right: 0, bottom: 0, width: 4,
+              cursor:     "col-resize",
+              backgroundColor: "transparent",
+            }}
+            className="hover:bg-blue-300/50 transition-colors"
+          />
+        )}
+      </th>
+    );
   }
 
+  // ── Cell renderer ─────────────────────────────────────────────────────────
+  function renderCell(colId: ColId, r: Result, idx: number): React.ReactNode {
+    const up       = (r.change_pct ?? 0) >= 0;
+    const rc       = r.rsi == null ? "#aaa" : r.rsi > 70 ? "#dc2626" : r.rsi < 30 ? "#16a34a" : "#222";
+    const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
+    const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
+    const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
+    const dayCount = daysInScanMap[r.ticker];
+    const w        = colWidths[colId] ?? ALL_COLS.find(c => c.id === colId)!.defW;
+
+    const tdBase: React.CSSProperties = { width: w, minWidth: w, maxWidth: w, overflow: "hidden" };
+
+    switch (colId) {
+      case "fav":
+        return (
+          <td key={colId} className="px-1 py-1 text-center" style={tdBase}>
+            <button onClick={() => toggleFavorite(r)}
+              title={favorites[r.ticker] ? "Remove from favorites" : "Add to favorites"}
+              className="text-base leading-none transition-colors"
+              style={{ color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db" }}>
+              {favorites[r.ticker] ? "★" : "☆"}
+            </button>
+          </td>
+        );
+      case "idx":
+        return <td key={colId} className="px-2 py-1 text-gray-400" style={tdBase}>{(page-1)*pageSize+idx+1}</td>;
+      case "symbol":
+        return (
+          <td key={colId} className="px-2 py-1 font-bold whitespace-nowrap" style={tdBase}>
+            <button onClick={() => { setJumpToTicker(r.ticker); setView("charts"); }}
+              className="hover:underline" style={{ color: "#003399" }} title="View chart">
+              {r.symbol}
+            </button>
+            {r.new_52w_high && <span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
+            {isNew    && <span className="ml-1 text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New in this scan vs yesterday">🆕</span>}
+            {isRepeat && <span className="ml-1 text-[9px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan too">✓</span>}
+            {watchlistSyms.has(r.symbol) && (
+              <span className="ml-1 text-[9px] px-1 rounded font-bold" title="In your watchlist"
+                style={{ backgroundColor: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d" }}>
+                WL
+              </span>
+            )}
+          </td>
+        );
+      case "name":
+        return <td key={colId} className="px-2 py-1 max-w-[140px] truncate text-gray-700" style={tdBase}>{r.name}</td>;
+      case "sector":
+        return (
+          <td key={colId} className="px-2 py-1" style={tdBase}>
+            <button onClick={() => { setSF(r.sector); setRS(""); goToPage(1); }}
+              title={`Filter by ${r.sector}`}
+              className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px] hover:bg-blue-100 cursor-pointer truncate block max-w-full">
+              {r.sector}
+            </button>
+          </td>
+        );
+      case "industry":
+        return <td key={colId} className="px-2 py-1 text-gray-500 text-[11px] whitespace-nowrap truncate" style={tdBase}>{r.industry || "—"}</td>;
+      case "cap":
+        return (
+          <td key={colId} className="px-2 py-1" style={tdBase}>
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+              style={{
+                color:           CAP_COLORS[r.cap_size] ?? "#6b7280",
+                backgroundColor: (CAP_COLORS[r.cap_size] ?? "#6b7280") + "18",
+                border:          "1px solid " + (CAP_COLORS[r.cap_size] ?? "#6b7280") + "50",
+              }}>
+              {r.cap_size}
+            </span>
+          </td>
+        );
+      case "mktcap":
+        return <td key={colId} className="px-2 py-1 text-gray-600 text-[11px] whitespace-nowrap" style={tdBase}>{fmtCap(r.market_cap, active?.exchange ?? "NSE")}</td>;
+      case "price":
+        return <td key={colId} className="px-2 py-1 font-bold text-[13px] tabular-nums" style={tdBase}>{r.price?.toLocaleString()}</td>;
+      case "chg":
+        return <td key={colId} className="px-2 py-1 font-semibold tabular-nums" style={{ ...tdBase, color: up ? "#16a34a" : "#dc2626" }}>{up ? "+" : ""}{r.change_pct}%</td>;
+      case "earnings":
+        return (
+          <td key={colId} className="px-2 py-1 whitespace-nowrap tabular-nums" style={{ ...tdBase, color: earningsColor(earnings[r.ticker] ?? ""), fontWeight: earnings[r.ticker] ? 600 : 400 }}>
+            {fmtEarnings(earnings[r.ticker] ?? "") || "—"}
+          </td>
+        );
+      case "volume":
+        return (
+          <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: volSurge ? "#ea580c" : "#4b5563" }}>
+            {fmtVol(r.volume)}
+            {volSurge && r.avg_vol_20 && <span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume / r.avg_vol_20).toFixed(1)}×</span>}
+          </td>
+        );
+      case "rsi":
+        return (
+          <td key={colId} className="px-2 py-1" style={tdBase}>
+            {r.rsi != null
+              ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
+                  style={{ color: rc, backgroundColor: r.rsi > 70 ? "#fee2e2" : r.rsi < 30 ? "#dcfce7" : "#f3f4f6" }}>
+                  {r.rsi}
+                </span>
+              : <span className="text-gray-400">—</span>}
+          </td>
+        );
+      case "macd":
+        return (
+          <td key={colId} className="px-2 py-1" style={tdBase}>
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${r.macd_bullish ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+              {r.macd_bullish ? "▲ Bull" : "▼ Bear"}
+            </span>
+          </td>
+        );
+      case "sma20":
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma20 != null && r.price > r.sma20 ? "#16a34a" : "#dc2626" }}>{r.sma20 ?? "—"}</td>;
+      case "sma50":
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma50 != null && r.price > r.sma50 ? "#16a34a" : "#dc2626" }}>{r.sma50 ?? "—"}</td>;
+      case "sma200":
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma200 != null && r.price > r.sma200 ? "#16a34a" : "#dc2626" }}>{r.sma200 ?? "—"}</td>;
+      case "h52":
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: (r.pct_from_52w_high ?? -99) >= -5 ? "#16a34a" : "#555" }}>{r.pct_from_52w_high != null ? `${r.pct_from_52w_high}%` : "—"}</td>;
+      case "days":
+        return (
+          <td key={colId} className="px-2 py-1 text-center" style={tdBase}>
+            {dayCount != null
+              ? <span
+                  title={`In this scan for ${dayCount} consecutive day${dayCount > 1 ? "s" : ""}`}
+                  className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums"
+                  style={{
+                    backgroundColor: dayCount >= 3 ? "#dcfce7" : dayCount >= 2 ? "#fef9c3" : "#f3f4f6",
+                    color:           dayCount >= 3 ? "#15803d" : dayCount >= 2 ? "#92400e" : "#6b7280",
+                  }}>
+                  {dayCount}d
+                </span>
+              : <span className="text-gray-300 text-[10px]">1d</span>}
+          </td>
+        );
+      case "chart":
+        return <td key={colId} className="px-0 py-0" style={tdBase}>{r.sparkline.length > 0 && <Sparkline data={r.sparkline} positive={up} />}</td>;
+      default:
+        return <td key={colId} />;
+    }
+  }
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
   function Pagination({ count, total }: { count: number; total: number }) {
     if(count===0) return null;
     return <div className="flex items-center justify-between px-3 py-2 bg-white text-xs sticky bottom-0 shadow-[0_-4px_12px_rgba(0,0,0,0.07)] border-t border-gray-100">
@@ -469,15 +828,10 @@ export default function ScreenerPage() {
               </button>
             )}
             {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
-            <input
-              type="date"
-              value={asOfDate}
-              onChange={e => setAsOfDate(e.target.value)}
-              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400"
-            />
+            <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)}
+              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400" />
             {asOfDate && (
-              <button
-                onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
+              <button onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
                 className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap">
                 Today
               </button>
@@ -548,7 +902,7 @@ export default function ScreenerPage() {
                       const up=(r.change_pct??0)>=0;
                       const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
-                      return <tr key={r.ticker} className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#3b82f6]"} border-b border-gray-100 transition-all`}>
+                      return <tr key={r.ticker} className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} border-b border-gray-100 transition-all`}>
                         <td className="px-1 py-1 text-center">
                           <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
                             className="text-base leading-none" style={{color:"#f59e0b"}}>★</button>
@@ -603,7 +957,6 @@ export default function ScreenerPage() {
                             className="text-xl leading-none shrink-0" style={{color:"#f59e0b"}}>★</button>
                           <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
                           {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                          <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span>
                         </div>
                         <div className="flex-1 min-w-0">
                           <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
@@ -659,7 +1012,7 @@ export default function ScreenerPage() {
                     {!loading && results.length>0 && (()=>{
                       const minAgo = lastRefreshed ? Math.floor((Date.now()-lastRefreshed.getTime())/60_000) : null;
                       const stale  = minAgo !== null && minAgo >= 30;
-                      void tick; // subscribe to 60s re-render
+                      void tick;
                       return <>
                         <span className="text-gray-300">·</span>
                         <span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
@@ -680,12 +1033,30 @@ export default function ScreenerPage() {
                 ) : (
                   <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
                 )}
+                {/* Re-run button */}
+                {active && !loading && (
+                  <button
+                    onClick={() => runScreen(active, asOfDate)}
+                    title="Re-run this scan (R)"
+                    className="px-2.5 py-1 rounded border text-[11px] flex items-center gap-1 transition-colors"
+                    style={{ borderColor: "#d1d5db", color: "#374151", backgroundColor: "white" }}
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#eff6ff"; e.currentTarget.style.borderColor = "#93c5fd"; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = "white"; e.currentTarget.style.borderColor = "#d1d5db"; }}>
+                    ↺ Re-run
+                  </button>
+                )}
+                {/* Restored-from-cache banner */}
+                {restored && !loading && results.length > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+                    Restored · re-run to refresh
+                  </span>
+                )}
                 {error && <span className="text-red-500">{error}</span>}
                 {warning && <span className="text-amber-600 text-[10px] max-w-lg leading-tight">{warning}</span>}
 
                 {/* View tabs — right side */}
                 {!loading && results.length>0 && (
-                  <div className="ml-auto flex items-center gap-3">
+                  <div className="ml-auto flex items-center gap-2 flex-wrap">
                     {/* Search */}
                     <div className="relative">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
@@ -700,7 +1071,59 @@ export default function ScreenerPage() {
                     <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
                       {["All","Mega","Large","Mid","Small"].map(c=><option key={c}>{c}</option>)}
                     </select>
-                    {/* View toggle — tab style */}
+
+                    {/* Columns button */}
+                    {view === "overview" && (
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowColMenu(v => !v)}
+                          className="px-2.5 py-1 rounded border text-[11px] flex items-center gap-1 transition-colors"
+                          style={{
+                            borderColor:     showColMenu ? "#3b82f6" : "#d1d5db",
+                            backgroundColor: showColMenu ? "#eff6ff" : "white",
+                            color:           showColMenu ? "#2563eb" : "#374151",
+                          }}>
+                          ⊞ Columns
+                          {hiddenCols.size > 0 && (
+                            <span className="px-1 rounded text-[9px] font-bold bg-blue-100 text-blue-700">{ALL_COL_IDS.length - FIXED_COL_IDS.size - hiddenCols.size + hiddenCols.size === 0 ? "" : `−${hiddenCols.size}`}</span>
+                          )}
+                        </button>
+                        {showColMenu && (
+                          <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-xl p-2 w-52"
+                            style={{ maxHeight: 400, overflowY: "auto" }}>
+                            <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide px-1 pb-1.5 mb-1 border-b border-gray-100">
+                              Show / hide · drag headers to reorder
+                            </div>
+                            {colOrder.filter(id => !FIXED_COL_IDS.has(id)).map(id => {
+                              const def = ALL_COLS.find(c => c.id === id)!;
+                              const hidden = hiddenCols.has(id);
+                              return (
+                                <label key={id}
+                                  className="flex items-center gap-2 px-1.5 py-1 rounded cursor-pointer hover:bg-gray-50 text-[11px] text-gray-700 select-none">
+                                  <input type="checkbox" checked={!hidden} onChange={() => toggleHidden(id)}
+                                    className="accent-blue-600 w-3 h-3" />
+                                  {def.label}
+                                </label>
+                              );
+                            })}
+                            <div className="border-t border-gray-100 mt-1.5 pt-1.5 flex gap-1">
+                              <button
+                                onClick={() => saveHiddenCols(new Set())}
+                                className="flex-1 text-[10px] py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">
+                                Show all
+                              </button>
+                              <button
+                                onClick={() => saveColOrder([...ALL_COL_IDS])}
+                                className="flex-1 text-[10px] py-0.5 rounded border border-gray-200 text-gray-500 hover:bg-gray-50">
+                                Reset order
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* View toggle */}
                     <div className="flex border border-gray-200 rounded overflow-hidden">
                       {(["overview","charts"] as const).map(v=>(
                         <button key={v} onClick={()=>setView(v)}
@@ -710,10 +1133,9 @@ export default function ScreenerPage() {
                         </button>
                       ))}
                     </div>
-                    {/* Chart controls — only in charts view */}
+                    {/* Chart controls */}
                     {view==="charts" && (
                       <>
-                        {/* Height */}
                         <div className="flex border border-gray-200 rounded overflow-hidden">
                           {(["sm","md","lg"] as const).map((s,i)=>(
                             <button key={s} onClick={()=>setChartSize(s)}
@@ -723,7 +1145,6 @@ export default function ScreenerPage() {
                             </button>
                           ))}
                         </div>
-                        {/* Layout: 1-col / 2-col */}
                         <div className="flex border border-gray-200 rounded overflow-hidden">
                           <button onClick={()=>setChartCols(1)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
@@ -740,7 +1161,7 @@ export default function ScreenerPage() {
                 )}
               </div>
 
-              {/* Row 2: sector breakdown chips — only when results exist */}
+              {/* Row 2: sector chips */}
               {!loading && sectorCounts.length>0 && (
                 <div className="px-3 pb-1.5 flex items-center gap-2">
                   <span className="text-[10px] text-gray-400 shrink-0">Sectors:</span>
@@ -751,8 +1172,8 @@ export default function ScreenerPage() {
                           className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
                           style={{
                             backgroundColor: sectorFilter===sec?"#003366":"#f1f5f9",
-                            color: sectorFilter===sec?"white":"#475569",
-                            borderColor: sectorFilter===sec?"#003366":"#e2e8f0",
+                            color:           sectorFilter===sec?"white":"#475569",
+                            borderColor:     sectorFilter===sec?"#003366":"#e2e8f0",
                           }}>
                           {sec} <span className="opacity-70">{cnt}</span>
                         </button>
@@ -784,7 +1205,7 @@ export default function ScreenerPage() {
               </div>
             )}
 
-            {/* Loading — real progress */}
+            {/* Loading */}
             {loading && <ScanProgress progress={scanProgress} startMs={scanStartRef.current} exchange={active?.exchange??""} />}
 
             {/* Empty */}
@@ -796,94 +1217,27 @@ export default function ScreenerPage() {
               </div>
             )}
 
-            {/* ── Overview table ─────────────────────────────────────────── */}
+            {/* ── Overview table (dynamic columns) ───────────────────────── */}
             {!loading && results.length>0 && view==="overview" && (
-              <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
-                <table className="text-xs w-full">
+              <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col" onClick={() => showColMenu && setShowColMenu(false)}>
+                <table className="text-xs" style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}>
                   <thead>
                     <tr className="bg-gray-100 sticky top-0 z-10 border-b-2 border-gray-200">
-                      <th className="px-1 py-1.5 w-6 text-center text-gray-500 font-semibold text-[11px]">★</th>
-                      <th className="px-2 py-1.5 text-gray-500 font-semibold text-[11px] w-7">#</th>
-                      <TH label="Symbol" k="symbol"/>
-                      <TH label="Company" k="name"/>
-                      <TH label="Sector" k="sector"/>
-                      <TH label="Industry" k="industry"/>
-                      <TH label="Cap" k="cap_size"/>
-                      <TH label="Mkt Cap" k="market_cap"/>
-                      <TH label="Price" k="price"/>
-                      <TH label="Chg %" k="change_pct"/>
-                      <th className="px-2 py-1.5 font-semibold text-gray-600 text-[11px] whitespace-nowrap">Earnings</th>
-                      <TH label="Volume" k="volume"/>
-                      <TH label="RSI" k="rsi"/>
-                      <TH label="MACD" k="macd_bullish"/>
-                      <TH label="SMA20" k="sma20"/>
-                      <TH label="SMA50" k="sma50"/>
-                      <TH label="SMA200" k="sma200"/>
-                      <TH label="% 52H" k="pct_from_52w_high"/>
-                      <th className="px-2 py-1.5 font-semibold text-gray-600 text-[11px] text-center">Chart</th>
+                      {visibleCols.map(id => {
+                        const def = ALL_COLS.find(c => c.id === id)!;
+                        return <ColTH key={id} id={id} defW={def.defW} />;
+                      })}
                     </tr>
                   </thead>
                   <tbody>
                     {paged.map((r,idx)=>{
-                      const up=(r.change_pct??0)>=0;
-                      const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
-                      const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
-                      const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
-                      return <tr key={r.ticker} className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#3b82f6]"} border-b border-gray-100 transition-all`}>
-                        <td className="px-1 py-1 text-center">
-                          <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
-                            className="text-base leading-none transition-colors"
-                            style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
-                            {favorites[r.ticker] ? "★" : "☆"}
-                          </button>
-                        </td>
-                        <td className="px-2 py-1 text-gray-400">{(page-1)*pageSize+idx+1}</td>
-                        <td className="px-2 py-1 font-bold whitespace-nowrap">
-                          <button
-                            onClick={()=>{ setJumpToTicker(r.ticker); setView("charts"); }}
-                            className="hover:underline"
-                            style={{color:"#003399"}}
-                            title="View chart">
-                            {r.symbol}
-                          </button>
-                          {r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
-                          {isNew   &&<span className="ml-1 text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
-                          {isRepeat&&<span className="ml-1 text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
-                        </td>
-                        <td className="px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
-                        <td className="px-2 py-1">
-                          <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}} title={`Filter by ${r.sector}`}
-                            className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px] hover:bg-blue-100 cursor-pointer">{r.sector}</button>
-                        </td>
-                        <td className="px-2 py-1 text-gray-500 text-[11px] whitespace-nowrap">{r.industry||"—"}</td>
-                        <td className="px-2 py-1"><span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span></td>
-                        <td className="px-2 py-1 text-gray-600 text-[11px] whitespace-nowrap">{fmtCap(r.market_cap,active?.exchange??"NSE")}</td>
-                        <td className="px-2 py-1 font-bold text-[13px] tabular-nums">{r.price?.toLocaleString()}</td>
-                        <td className="px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
-                        <td className="px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")||"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
-                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
-                        </td>
-                        <td className="px-2 py-1">
-                          {r.rsi!=null
-                            ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
-                                style={{color:rc,backgroundColor:r.rsi>70?"#fee2e2":r.rsi<30?"#dcfce7":"#f3f4f6"}}>
-                                {r.rsi}
-                              </span>
-                            : <span className="text-gray-400">—</span>}
-                        </td>
-                        <td className="px-2 py-1">
-                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${r.macd_bullish?"bg-green-100 text-green-700":"bg-red-100 text-red-600"}`}>
-                            {r.macd_bullish?"▲ Bull":"▼ Bear"}
-                          </span>
-                        </td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma200!=null&&r.price>r.sma200?"#16a34a":"#dc2626"}}>{r.sma200??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
-                        <td className="px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
-                      </tr>;
+                      return (
+                        <tr key={r.ticker}
+                          className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#3b82f6]"} border-b border-gray-100 transition-all`}>
+                          {visibleCols.map(colId => renderCell(colId, r, idx))}
+                        </tr>
+                      );
                     })}
                   </tbody>
                 </table>
@@ -891,7 +1245,7 @@ export default function ScreenerPage() {
               </div>
             )}
 
-            {/* ── Charts view — 1 card per row, full width ──────────────── */}
+            {/* ── Charts view ─────────────────────────────────────────────── */}
             {!loading && results.length>0 && view==="charts" && (
               <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
                 {/* Master zoom bar */}
@@ -901,12 +1255,12 @@ export default function ScreenerPage() {
                     <button
                       onClick={() => setMasterZoom(v => Math.min(300, v + Math.max(1, Math.round(v * 0.15))))}
                       className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-r border-gray-300 transition-colors"
-                      title="Zoom out all charts">−</button>
+                      title="Zoom out">−</button>
                     <span className="px-2 text-xs text-gray-500 tabular-nums min-w-[40px] text-center">{masterZoom}b</span>
                     <button
                       onClick={() => setMasterZoom(v => Math.max(10, v - Math.max(1, Math.round(v * 0.15))))}
                       className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-l border-gray-300 transition-colors"
-                      title="Zoom in all charts">+</button>
+                      title="Zoom in">+</button>
                   </div>
                   <button
                     onClick={() => setMasterZoom(69)}
@@ -920,10 +1274,10 @@ export default function ScreenerPage() {
                     const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
                     const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
                     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
+                    const dayCount = daysInScanMap[r.ticker];
                     return (
                       <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "#003366" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
                         {chartCols===1 ? (
-                          /* ── 1-col: full horizontal header ── */
                           <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
                             <div className="flex items-center gap-2 min-w-[120px]">
                               <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
@@ -933,8 +1287,18 @@ export default function ScreenerPage() {
                               </button>
                               <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
-                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
+                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
+                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
+                              {dayCount != null && dayCount > 1 && (
+                                <span className="text-[9px] px-1 rounded font-bold"
+                                  style={{ backgroundColor: dayCount >= 3 ? "#dcfce7" : "#fef9c3", color: dayCount >= 3 ? "#15803d" : "#92400e" }}>
+                                  {dayCount}d
+                                </span>
+                              )}
+                              {watchlistSyms.has(r.symbol) && (
+                                <span className="text-[9px] px-1 rounded font-bold" title="In your watchlist"
+                                  style={{ backgroundColor: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d" }}>WL</span>
+                              )}
                               <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -964,7 +1328,6 @@ export default function ScreenerPage() {
                             </div>
                           </div>
                         ) : (
-                          /* ── 2-col: compact stacked header ── */
                           <div className="px-3 py-2 border-b border-gray-100">
                             <div className="flex items-center gap-1.5">
                               <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
@@ -974,8 +1337,18 @@ export default function ScreenerPage() {
                               </button>
                               <span className="font-bold text-sm" style={{color:"#003399"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold">🆕</span>}
-                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1">✓</span>}
+                              {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
+                              {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
+                              {dayCount != null && dayCount > 1 && (
+                                <span className="text-[9px] px-1 rounded font-bold"
+                                  style={{ backgroundColor: dayCount >= 3 ? "#dcfce7" : "#fef9c3", color: dayCount >= 3 ? "#15803d" : "#92400e" }}>
+                                  {dayCount}d
+                                </span>
+                              )}
+                              {watchlistSyms.has(r.symbol) && (
+                                <span className="text-[9px] px-1 rounded font-bold" title="In your watchlist"
+                                  style={{ backgroundColor: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d" }}>WL</span>
+                              )}
                               <span className="rounded px-1 py-0.5 text-[9px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span>
                               <div className="flex-1 min-w-0 mx-1">
                                 <span className="text-xs text-gray-600 font-medium truncate block">{r.name}</span>
@@ -997,7 +1370,6 @@ export default function ScreenerPage() {
                             </div>
                           </div>
                         )}
-                        {/* Interactive chart */}
                         <InteractiveChart data={r.ohlcv} masterBars={masterZoom} priceHeight={CHART_H[chartSize]}/>
                       </div>
                     );

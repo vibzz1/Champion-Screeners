@@ -1685,7 +1685,9 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
             data.update(batch_data)
 
     print(f"[screener] {exchange}: {len(data)} tickers downloaded — saving cache…")
-    if len(data) >= max(50, len(tickers) * 0.5):
+    # Save if we got at least 10% coverage (was 50% — too strict for international exchanges
+    # where yfinance occasionally rate-limits a batch; partial cache is far better than none).
+    if len(data) >= max(20, len(tickers) * 0.1):
         _save_ohlcv_cache(exchange, data)
     else:
         print(f"[screener] {exchange}: skipping cache save ({len(data)}/{len(tickers)})")

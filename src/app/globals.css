@@ -6,3 +6,21 @@ body {
   background: #f1f5f9;
   color: #1e293b;
 }
+
+/* ── Dark mode — CSS-filter invert applied to main content only ─────────── */
+[data-theme="dark"] main {
+  filter: invert(1) hue-rotate(180deg);
+  background: #fff;
+}
+/* Re-invert charts (canvas) and images so they keep original colours */
+[data-theme="dark"] main canvas,
+[data-theme="dark"] main img,
+[data-theme="dark"] main video {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* ── Column resize cursor on drag ────────────────────────────────────────── */
+.col-resize-active * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
