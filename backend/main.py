@@ -255,6 +255,22 @@ def cache_status():
         "files": files,
     }
 
+@app.post("/api/cache/clear")
+def clear_ohlcv_cache(exchange: str = None):
+    """Delete OHLCV cache files so the next scan triggers a fresh download.
+    Pass ?exchange=NSE to clear only one exchange; omit to clear all."""
+    deleted = []
+    errors = []
+    if OHLCV_CACHE_DIR.exists():
+        pattern = f"{exchange}_*.pkl" if exchange else "*.pkl"
+        for f in OHLCV_CACHE_DIR.glob(pattern):
+            try:
+                f.unlink()
+                deleted.append(f.name)
+            except Exception as e:
+                errors.append(f"{f.name}: {e}")
+    return {"deleted": deleted, "errors": errors, "count": len(deleted)}
+
 @app.get("/api/screener/bhavcopy/status")
 def bhavcopy_status():
     """NSE Bhavcopy DB health — source, dates covered, tickers, and cache state."""
