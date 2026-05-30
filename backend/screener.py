@@ -2035,8 +2035,10 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
     if f.get("price_max") is not None and p > f["price_max"]: return False
 
     # Change %
+    # MIO's `price > c[1]` is strict — exactly 0% change (price == prev close) must fail.
+    # We store this as change_pct_min=0; use <= so chg=0 is rejected, matching MIO.
     chg = ind["change_pct"]
-    if f.get("change_pct_min") is not None and (chg is None or chg < f["change_pct_min"]): return False
+    if f.get("change_pct_min") is not None and (chg is None or chg <= f["change_pct_min"]): return False
     if f.get("change_pct_max") is not None and (chg is None or chg > f["change_pct_max"]): return False
 
     # Volume: last day
