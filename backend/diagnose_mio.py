@@ -44,6 +44,7 @@ with open(cache_file, "rb") as f:
     ohlcv_data = pickle.load(f)
 print(f"Cache: {len(ohlcv_data)} tickers")
 
+
 # ── Parse formula ──────────────────────────────────────────────────────────
 filters = parse_formula(FORMULA, exchange=EXCHANGE)
 print(f"Parsed filters: {sorted(filters.keys())}\n")
