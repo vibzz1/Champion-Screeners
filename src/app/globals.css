@@ -1,26 +1,191 @@
 @import "tailwindcss";
 
+/* ── Design tokens ───────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --mio-bg:         #f8fafc;   /* warm page bg */
+  --mio-surface:    #ffffff;   /* card / table surface */
+  --mio-surface2:   #f1f5f9;   /* toolbar / header */
+  --mio-surface3:   #f8fafc;   /* alt table row */
+
+  /* Borders */
+  --mio-border:     #e8ecf1;
+  --mio-border2:    #f1f5f9;
+
+  /* Text */
+  --mio-text:       #1e293b;
+  --mio-text2:      #64748b;
+  --mio-text3:      #94a3b8;
+
+  /* Accent / brand */
+  --mio-accent:     #003366;
+  --mio-ticker:     #003399;
+
+  /* Sort active */
+  --mio-sort-bg:    #dbeafe;
+  --mio-sort-c:     #1d4ed8;
+  --mio-sort-bar:   #3b82f6;
+
+  /* Semantic */
+  --mio-up:         #16a34a;
+  --mio-dn:         #dc2626;
+  --mio-up-bg:      #dcfce7;
+  --mio-dn-bg:      #fee2e2;
+  --mio-neutral-bg: #f3f4f6;
+  --mio-neutral-c:  #374151;
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --mio-bg:         #0b0f1a;
+  --mio-surface:    #111827;
+  --mio-surface2:   #1c2538;
+  --mio-surface3:   #0f1523;
+
+  --mio-border:     rgba(255,255,255,0.07);
+  --mio-border2:    rgba(255,255,255,0.035);
+
+  --mio-text:       #e2e8f0;
+  --mio-text2:      #94a3b8;
+  --mio-text3:      #475569;
+
+  --mio-accent:     #60a5fa;
+  --mio-ticker:     #93c5fd;
+
+  --mio-sort-bg:    rgba(96,165,250,0.14);
+  --mio-sort-c:     #60a5fa;
+  --mio-sort-bar:   #60a5fa;
+
+  --mio-up:         #4ade80;
+  --mio-dn:         #f87171;
+  --mio-up-bg:      rgba(74,222,128,0.1);
+  --mio-dn-bg:      rgba(248,113,113,0.12);
+  --mio-neutral-bg: rgba(255,255,255,0.05);
+  --mio-neutral-c:  #94a3b8;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
 body {
-  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  background: #f1f5f9;
-  color: #1e293b;
+  background: var(--mio-bg);
+  color: var(--mio-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Dark mode — CSS-filter invert applied to main content only ─────────── */
-[data-theme="dark"] main {
-  filter: invert(1) hue-rotate(180deg);
-  background: #fff;
-}
-/* Re-invert charts (canvas) and images so they keep original colours */
-[data-theme="dark"] main canvas,
-[data-theme="dark"] main img,
-[data-theme="dark"] main video {
-  filter: invert(1) hue-rotate(180deg);
+/* ── Table headers: uppercase + tracked ────────────────────────────────── */
+thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  font-size: 10px !important;
+  font-weight: 700 !important;
 }
 
-/* ── Column resize cursor on drag ────────────────────────────────────────── */
-.col-resize-active * {
-  cursor: col-resize !important;
-  user-select: none !important;
+/* ── Zebra striping (barely-there, just enough to track rows) ─────────── */
+tbody tr:nth-child(even) {
+  background: var(--mio-surface3);
 }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar              { width: 5px; height: 5px; }
+::-webkit-scrollbar-track        { background: transparent; }
+::-webkit-scrollbar-thumb        { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover  { background: #94a3b8; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb       { background: #334155; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ── Col resize cursor ───────────────────────────────────────────────────── */
+.col-resize-active * { cursor: col-resize !important; user-select: none !important; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DARK MODE — targeted overrides for Tailwind utility classes
+   (inline style tokens handled via CSS vars in the JSX itself)
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Page + layout ───────────────────────────────────────────────────────── */
+[data-theme="dark"] main { background: var(--mio-bg); color: var(--mio-text); }
+
+/* ── Surface backgrounds ─────────────────────────────────────────────────── */
+[data-theme="dark"] main .bg-white,
+[data-theme="dark"] main .bg-\[\#f8fbff\]           { background: var(--mio-surface)  !important; }
+[data-theme="dark"] main .bg-slate-50,
+[data-theme="dark"] main .bg-gray-50                { background: var(--mio-surface2) !important; }
+[data-theme="dark"] main .bg-gray-100               { background: var(--mio-surface2) !important; }
+[data-theme="dark"] main .bg-\[\#f1f5f9\]           { background: var(--mio-surface2) !important; }
+
+/* ── Table ───────────────────────────────────────────────────────────────── */
+[data-theme="dark"] main table                      { background: var(--mio-surface); }
+[data-theme="dark"] main tbody tr:nth-child(even)   { background: var(--mio-surface3) !important; }
+[data-theme="dark"] main tbody tr:hover             { background: rgba(255,255,255,0.028) !important; }
+[data-theme="dark"] main .hover\:bg-slate-50:hover  { background: rgba(255,255,255,0.025) !important; }
+[data-theme="dark"] main .hover\:bg-orange-50:hover { background: rgba(234,88,12,0.08)  !important; }
+[data-theme="dark"] main .bg-orange-50\/60          { background: rgba(234,88,12,0.06)  !important; }
+
+/* ── Borders ─────────────────────────────────────────────────────────────── */
+[data-theme="dark"] main .border-gray-100,
+[data-theme="dark"] main .border-gray-200           { border-color: var(--mio-border)  !important; }
+[data-theme="dark"] main .border-b-2                { border-color: var(--mio-border)  !important; }
+[data-theme="dark"] main .shadow-sm                 { box-shadow: 0 1px 3px rgba(0,0,0,0.4) !important; }
+[data-theme="dark"] main .shadow-\[0_-4px_12px_rgba\(0\,0\,0\,0\.07\)\] {
+                                                      box-shadow: 0 -4px 12px rgba(0,0,0,0.4) !important; }
+
+/* ── Text ────────────────────────────────────────────────────────────────── */
+[data-theme="dark"] main .text-gray-700             { color: #cbd5e1 !important; }
+[data-theme="dark"] main .text-gray-600             { color: #94a3b8 !important; }
+[data-theme="dark"] main .text-gray-500             { color: #64748b !important; }
+[data-theme="dark"] main .text-gray-400             { color: #475569 !important; }
+[data-theme="dark"] main .text-gray-300             { color: #334155 !important; }
+
+/* ── Semantic chips ──────────────────────────────────────────────────────── */
+[data-theme="dark"] main .bg-blue-50               { background: rgba(96,165,250,0.08)  !important; }
+[data-theme="dark"] main .text-blue-700            { color: #93c5fd !important; }
+[data-theme="dark"] main .hover\:bg-blue-100:hover { background: rgba(96,165,250,0.14) !important; }
+[data-theme="dark"] main .bg-blue-100              { background: rgba(96,165,250,0.14) !important; }
+[data-theme="dark"] main .text-blue-600            { color: #60a5fa !important; }
+[data-theme="dark"] main .text-blue-700            { color: #93c5fd !important; }
+
+/* MACD / signal badges */
+[data-theme="dark"] main .bg-green-100             { background: var(--mio-up-bg)  !important; }
+[data-theme="dark"] main .text-green-700           { color: var(--mio-up)          !important; }
+[data-theme="dark"] main .bg-red-100               { background: var(--mio-dn-bg)  !important; }
+[data-theme="dark"] main .text-red-600             { color: var(--mio-dn)          !important; }
+[data-theme="dark"] main .bg-green-50              { background: rgba(74,222,128,0.07) !important; }
+[data-theme="dark"] main .text-green-700           { color: var(--mio-up) !important; }
+
+/* Days-in-scan chip shades */
+[data-theme="dark"] main .bg-\[#dcfce7\],
+[data-theme="dark"] main .bg-yellow-50,
+[data-theme="dark"] main .bg-\[#fef9c3\]           { background: rgba(250,204,21,0.1)   !important; }
+
+/* Purple/cap badges */
+[data-theme="dark"] main .bg-purple-100            { background: rgba(124,58,237,0.15) !important; }
+[data-theme="dark"] main .text-purple-700          { color: #c084fc !important; }
+
+/* Orange */
+[data-theme="dark"] main .text-orange-500,
+[data-theme="dark"] main .text-amber-600           { color: #fb923c !important; }
+
+/* Scan diff banners */
+[data-theme="dark"] main .bg-red-50                { background: rgba(248,113,113,0.07) !important; }
+[data-theme="dark"] main .text-red-500             { color: var(--mio-dn) !important; }
+[data-theme="dark"] main .bg-amber-100             { background: rgba(251,191,36,0.12)  !important; }
+[data-theme="dark"] main .text-amber-700           { color: #fbbf24 !important; }
+
+/* Live badge */
+[data-theme="dark"] main .bg-green-100.text-green-700 { background: rgba(74,222,128,0.12) !important; }
+[data-theme="dark"] main .border-green-300         { border-color: rgba(74,222,128,0.3) !important; }
+
+/* Pagination sticky footer */
+[data-theme="dark"] main .sticky.bottom-0.bg-white { background: var(--mio-surface) !important; }
+
+/* ── Inputs & form controls ──────────────────────────────────────────────── */
+[data-theme="dark"] main input,
+[data-theme="dark"] main select,
+[data-theme="dark"] main textarea {
+  background:   var(--mio-surface2) !important;
+  color:        var(--mio-text)     !important;
+  border-color: var(--mio-border)   !important;
+}
+[data-theme="dark"] main input::placeholder  { color: var(--mio-text3) !important; }
+[data-theme="dark"] main input[type="date"]  { color-scheme: dark; }

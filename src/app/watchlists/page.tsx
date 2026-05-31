@@ -87,14 +87,14 @@ export default function WatchlistsPage() {
 
   return (
     <div>
-      <h2 className="text-lg font-bold mb-3" style={{ color: "#003366" }}>Watch Lists</h2>
+      <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Watch Lists</h2>
       {error && <p className="text-red-600 text-xs mb-2">{error}</p>}
 
       <div className="flex gap-4">
         {/* ── Left: list panel ─────────────────────────────────────────── */}
         <div className="w-52 shrink-0">
           <div className="border border-gray-200 rounded-lg overflow-hidden mb-2 shadow-sm">
-            <div className="text-[11px] font-bold text-white px-3 py-1.5" style={{ backgroundColor: "#003366" }}>
+            <div className="text-[11px] font-bold text-white px-3 py-1.5" style={{ backgroundColor: "var(--mio-accent)" }}>
               My Watch Lists
             </div>
             {lists.length === 0 && (
@@ -105,7 +105,7 @@ export default function WatchlistsPage() {
                 className="flex items-center justify-between px-3 py-1.5 cursor-pointer text-xs border-b border-gray-100 last:border-0 transition-colors"
                 style={{ backgroundColor: selected?.id === wl.id ? "#eff6ff" : undefined }}
                 onClick={() => setSelected(wl)}>
-                <span style={{ color: "#003399", fontWeight: selected?.id === wl.id ? 600 : 400 }}>
+                <span style={{ color: "var(--mio-ticker)", fontWeight: selected?.id === wl.id ? 600 : 400 }}>
                   {wl.name}
                 </span>
                 <button onClick={e => { e.stopPropagation(); deleteList(wl); }}
@@ -123,7 +123,7 @@ export default function WatchlistsPage() {
             />
             <button onClick={createList}
               className="px-2.5 py-1 text-xs text-white rounded font-semibold"
-              style={{ backgroundColor: "#003366" }}>+</button>
+              style={{ backgroundColor: "var(--mio-accent)" }}>+</button>
           </div>
         </div>
 
@@ -137,7 +137,7 @@ export default function WatchlistsPage() {
           ) : (
             <div className="border border-gray-200 rounded-lg overflow-hidden shadow-sm">
               {/* Header */}
-              <div className="flex items-center justify-between px-3 py-2 text-white text-xs" style={{ backgroundColor: "#003366" }}>
+              <div className="flex items-center justify-between px-3 py-2 text-white text-xs" style={{ backgroundColor: "var(--mio-accent)" }}>
                 <span className="font-bold">{selected.name}</span>
                 <div className="flex items-center gap-3">
                   {totalPnl !== null && (
@@ -162,7 +162,7 @@ export default function WatchlistsPage() {
                 />
                 <button onClick={addStock}
                   className="px-3 py-1 text-xs text-white rounded font-semibold"
-                  style={{ backgroundColor: "#003366" }}>
+                  style={{ backgroundColor: "var(--mio-accent)" }}>
                   + Add
                 </button>
                 <button onClick={() => selected && loadStocks(selected)}
@@ -196,7 +196,7 @@ export default function WatchlistsPage() {
                       const rsiCol = !q?.rsi ? "#aaa" : q.rsi > 70 ? "#dc2626" : q.rsi < 30 ? "#16a34a" : "#374151";
                       return (
                         <tr key={s.id} className="hover:bg-slate-50 border-b border-gray-100 last:border-0 transition-colors">
-                          <td className="px-3 py-1.5 font-bold" style={{ color: "#003399" }}>{s.symbol}</td>
+                          <td className="px-3 py-1.5 font-bold" style={{ color: "var(--mio-ticker)" }}>{s.symbol}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-gray-700">
                             {q?.price != null ? q.price.toLocaleString() : <span className="text-gray-300">—</span>}
                           </td>

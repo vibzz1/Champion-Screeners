@@ -127,21 +127,21 @@ export default function BacktesterPage() {
     { label: "Matched stocks", value: s.matched_count, note: `on ${s.entry_date}` },
     { label: "Total trades",   value: s.total_trades },
     { label: "Win rate",       value: `${s.win_rate}%`,
-      color: s.win_rate >= 50 ? "#16a34a" : "#dc2626" },
+      color: s.win_rate >= 50 ? "var(--mio-up)" : "var(--mio-dn)" },
     { label: "Total return",
       value: `${s.total_return_pct >= 0 ? "+" : ""}${s.total_return_pct}%`,
-      color: s.total_return_pct >= 0 ? "#16a34a" : "#dc2626" },
-    { label: "Max drawdown",   value: `-${s.max_drawdown_pct}%`, color: "#dc2626" },
+      color: s.total_return_pct >= 0 ? "var(--mio-up)" : "var(--mio-dn)" },
+    { label: "Max drawdown",   value: `-${s.max_drawdown_pct}%`, color: "var(--mio-dn)" },
     { label: "Profit factor",  value: s.profit_factor,
-      color: s.profit_factor >= 1.5 ? "#16a34a" : s.profit_factor < 1 ? "#dc2626" : "#92400e" },
-    { label: "Avg win",        value: `+${s.avg_win_pct}%`,  color: "#16a34a" },
-    { label: "Avg loss",       value: `-${s.avg_loss_pct}%`, color: "#dc2626" },
+      color: s.profit_factor >= 1.5 ? "var(--mio-up)" : s.profit_factor < 1 ? "var(--mio-dn)" : "#92400e" },
+    { label: "Avg win",        value: `+${s.avg_win_pct}%`,  color: "var(--mio-up)" },
+    { label: "Avg loss",       value: `-${s.avg_loss_pct}%`, color: "var(--mio-dn)" },
     { label: "Wins / Losses",  value: `${s.wins} / ${s.losses}` },
   ] : [];
 
   return (
     <div className="max-w-5xl">
-      <h2 className="text-lg font-bold mb-3" style={{ color: "#003366" }}>Strategy Backtester</h2>
+      <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Strategy Backtester</h2>
       <p className="text-xs text-gray-500 mb-4 leading-relaxed">
         Select a screener formula and an entry date. The backtester runs the formula on that date,
         buys every matched stock in equal weight, then tracks each position until the stop-loss,
@@ -231,7 +231,7 @@ export default function BacktesterPage() {
           <button
             onClick={run} disabled={loading}
             className="px-5 py-1.5 rounded text-white text-xs font-semibold disabled:opacity-50 flex items-center gap-1.5"
-            style={{ backgroundColor: "#003366" }}>
+            style={{ backgroundColor: "var(--mio-accent)" }}>
             {loading && <span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"/>}
             {loading ? "Running…" : "▶ Run Backtest"}
           </button>
@@ -249,7 +249,7 @@ export default function BacktesterPage() {
               <div key={c.label} className="border border-gray-200 rounded-lg p-2.5 bg-white text-center shadow-sm">
                 <div className="text-gray-400 text-[10px] mb-0.5">{c.label}</div>
                 <div className="font-bold text-base tabular-nums leading-tight"
-                  style={{ color: c.color || "#003366" }}>{c.value}</div>
+                  style={{ color: c.color || "var(--mio-accent)" }}>{c.value}</div>
                 {c.note && <div className="text-[9px] text-gray-400 mt-0.5">{c.note}</div>}
               </div>
             ))}
@@ -257,7 +257,7 @@ export default function BacktesterPage() {
 
           {/* Equity curve */}
           <div className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
-            <div className="text-xs font-semibold mb-2" style={{ color: "#003366" }}>
+            <div className="text-xs font-semibold mb-2" style={{ color: "var(--mio-accent)" }}>
               Portfolio equity curve
               <span className="ml-2 text-[10px] text-gray-400 font-normal">
                 starting {capital.toLocaleString()} → {result.equity_curve.at(-1)?.equity.toLocaleString()}
@@ -278,8 +278,8 @@ export default function BacktesterPage() {
                 <ReferenceLine y={capital} stroke="#94a3b8" strokeDasharray="4 2" />
                 <Line
                   type="monotone" dataKey="equity"
-                  stroke={s.total_return_pct >= 0 ? "#16a34a" : "#dc2626"}
-                  dot={{ r: 3, fill: "#fff", stroke: s.total_return_pct >= 0 ? "#16a34a" : "#dc2626", strokeWidth: 1.5 }}
+                  stroke={s.total_return_pct >= 0 ? "var(--mio-up)" : "var(--mio-dn)"}
+                  dot={{ r: 3, fill: "#fff", stroke: s.total_return_pct >= 0 ? "var(--mio-up)" : "var(--mio-dn)", strokeWidth: 1.5 }}
                   strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
@@ -288,7 +288,7 @@ export default function BacktesterPage() {
           {/* Trade list */}
           <div className="border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
             <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
-              <span className="text-xs font-semibold" style={{ color: "#003366" }}>
+              <span className="text-xs font-semibold" style={{ color: "var(--mio-accent)" }}>
                 Trade log ({result.trades.length} trades)
               </span>
               <span className="text-[10px] text-gray-400">— equal-weight, {holdDays}d max hold, SL {stopLoss}%, TP {takeProfit}%</span>
@@ -311,11 +311,11 @@ export default function BacktesterPage() {
                       <td className="px-2 py-1 tabular-nums">{t.entry.toLocaleString()}</td>
                       <td className="px-2 py-1 tabular-nums">{t.exit.toLocaleString()}</td>
                       <td className="px-2 py-1 tabular-nums font-semibold"
-                        style={{ color: t.pnl_pct > 0 ? "#16a34a" : t.pnl_pct < 0 ? "#dc2626" : "#6b7280" }}>
+                        style={{ color: t.pnl_pct > 0 ? "var(--mio-up)" : t.pnl_pct < 0 ? "var(--mio-dn)" : "#6b7280" }}>
                         {t.pnl_pct > 0 ? "+" : ""}{t.pnl_pct}%
                       </td>
                       <td className="px-2 py-1 tabular-nums"
-                        style={{ color: t.pnl_abs > 0 ? "#16a34a" : t.pnl_abs < 0 ? "#dc2626" : "#6b7280" }}>
+                        style={{ color: t.pnl_abs > 0 ? "var(--mio-up)" : t.pnl_abs < 0 ? "var(--mio-dn)" : "#6b7280" }}>
                         {t.pnl_abs > 0 ? "+" : ""}{t.pnl_abs.toLocaleString()}
                       </td>
                       <td className="px-2 py-1 tabular-nums text-gray-500">{t.bars_held}</td>

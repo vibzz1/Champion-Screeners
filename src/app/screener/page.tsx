@@ -578,21 +578,21 @@ export default function ScreenerPage() {
           width:           w,
           minWidth:        w,
           maxWidth:        w,
-          backgroundColor: isSort ? "#dbeafe" : undefined,
-          color:           isSort ? "#1d4ed8" : "#4b5563",
-          boxShadow:       isSort ? "inset 0 -2px 0 #3b82f6" : undefined,
+          backgroundColor: isSort ? "var(--mio-sort-bg)" : undefined,
+          color:           isSort ? "var(--mio-sort-c)" : "var(--mio-text2)",
+          boxShadow:       isSort ? "inset 0 -2px 0 var(--mio-sort-bar)" : undefined,
           opacity:         isDragging ? 0.4 : 1,
-          borderLeft:      isDropTarget ? "2px solid #3b82f6" : undefined,
+          borderLeft:      isDropTarget ? "2px solid var(--mio-sort-bar)" : undefined,
           cursor:          def.sortKey && !def.noSort ? "pointer" : (isFixed ? "default" : "grab"),
           position:        "relative",
           overflow:        "hidden",
           userSelect:      "none",
         }}
-        className="px-2 py-1.5 select-none whitespace-nowrap text-left font-semibold text-[11px] transition-colors hover:bg-blue-50"
+        className="px-2 py-1 select-none whitespace-nowrap text-left transition-colors hover:bg-blue-50"
       >
         {def.label}
         {def.sortKey && !def.noSort && (
-          <span className="ml-1" style={{ color: isSort ? "#2563eb" : "#cbd5e1", fontSize: "9px" }}>
+          <span className="ml-1" style={{ color: isSort ? "var(--mio-sort-c)" : "var(--mio-border)", fontSize: "9px" }}>
             {isSort ? (sortDir==="asc" ? "▲" : "▼") : "↕"}
           </span>
         )}
@@ -617,7 +617,7 @@ export default function ScreenerPage() {
   // ── Cell renderer ─────────────────────────────────────────────────────────
   function renderCell(colId: ColId, r: Result, idx: number): React.ReactNode {
     const up       = (r.change_pct ?? 0) >= 0;
-    const rc       = r.rsi == null ? "#aaa" : r.rsi > 70 ? "#dc2626" : r.rsi < 30 ? "#16a34a" : "#222";
+    const rc       = r.rsi == null ? "var(--mio-text3)" : r.rsi > 70 ? "var(--mio-dn)" : r.rsi < 30 ? "var(--mio-up)" : "var(--mio-text)";
     const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
     const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
@@ -644,7 +644,7 @@ export default function ScreenerPage() {
         return (
           <td key={colId} className="px-2 py-1 font-bold whitespace-nowrap" style={tdBase}>
             <button onClick={() => { setJumpToTicker(r.ticker); setView("charts"); }}
-              className="hover:underline" style={{ color: "#003399" }} title="View chart">
+              className="hover:underline" style={{ color: "var(--mio-ticker)" }} title="View chart">
               {r.symbol}
             </button>
             {r.new_52w_high && <span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
@@ -690,7 +690,7 @@ export default function ScreenerPage() {
       case "price":
         return <td key={colId} className="px-2 py-1 font-bold text-[13px] tabular-nums" style={tdBase}>{r.price?.toLocaleString()}</td>;
       case "chg":
-        return <td key={colId} className="px-2 py-1 font-semibold tabular-nums" style={{ ...tdBase, color: up ? "#16a34a" : "#dc2626" }}>{up ? "+" : ""}{r.change_pct}%</td>;
+        return <td key={colId} className="px-2 py-1 font-semibold tabular-nums" style={{ ...tdBase, color: up ? "var(--mio-up)" : "var(--mio-dn)" }}>{up ? "+" : ""}{r.change_pct}%</td>;
       case "earnings":
         return (
           <td key={colId} className="px-2 py-1 whitespace-nowrap tabular-nums" style={{ ...tdBase, color: earningsColor(earnings[r.ticker] ?? ""), fontWeight: earnings[r.ticker] ? 600 : 400 }}>
@@ -709,7 +709,7 @@ export default function ScreenerPage() {
           <td key={colId} className="px-2 py-1" style={tdBase}>
             {r.rsi != null
               ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
-                  style={{ color: rc, backgroundColor: r.rsi > 70 ? "#fee2e2" : r.rsi < 30 ? "#dcfce7" : "#f3f4f6" }}>
+                  style={{ color: rc, backgroundColor: r.rsi > 70 ? "var(--mio-dn-bg)" : r.rsi < 30 ? "var(--mio-up-bg)" : "var(--mio-neutral-bg)" }}>
                   {r.rsi}
                 </span>
               : <span className="text-gray-400">—</span>}
@@ -724,13 +724,13 @@ export default function ScreenerPage() {
           </td>
         );
       case "sma20":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma20 != null && r.price > r.sma20 ? "#16a34a" : "#dc2626" }}>{r.sma20 ?? "—"}</td>;
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma20 != null && r.price > r.sma20 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma20 ?? "—"}</td>;
       case "sma50":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma50 != null && r.price > r.sma50 ? "#16a34a" : "#dc2626" }}>{r.sma50 ?? "—"}</td>;
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma50 != null && r.price > r.sma50 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma50 ?? "—"}</td>;
       case "sma200":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma200 != null && r.price > r.sma200 ? "#16a34a" : "#dc2626" }}>{r.sma200 ?? "—"}</td>;
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma200 != null && r.price > r.sma200 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma200 ?? "—"}</td>;
       case "h52":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: (r.pct_from_52w_high ?? -99) >= -5 ? "#16a34a" : "#555" }}>{r.pct_from_52w_high != null ? `${r.pct_from_52w_high}%` : "—"}</td>;
+        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: (r.pct_from_52w_high ?? -99) >= -5 ? "var(--mio-up)" : "var(--mio-text2)" }}>{r.pct_from_52w_high != null ? `${r.pct_from_52w_high}%` : "—"}</td>;
       case "days":
         return (
           <td key={colId} className="px-2 py-1 text-center" style={tdBase}>
@@ -766,13 +766,13 @@ export default function ScreenerPage() {
         </select>
       </div>
       {total>1 && <div className="flex gap-1">
-        <button onClick={()=>goToPage(Math.max(1,page-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>◀</button>
+        <button onClick={()=>goToPage(Math.max(1,page-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"var(--mio-ticker)"}}>◀</button>
         {Array.from({length:Math.min(total,7)},(_,i)=>{
           const p=total<=7?i+1:page<=4?i+1:page>=total-3?total-6+i:page-3+i;
           return <button key={p} onClick={()=>goToPage(p)} className="w-6 h-5 rounded text-center"
-            style={{backgroundColor:page===p?"#003366":undefined,color:page===p?"white":"#003399",border:page===p?"none":"1px solid #d1d5db"}}>{p}</button>;
+            style={{backgroundColor:page===p?"var(--mio-accent)":undefined,color:page===p?"white":"var(--mio-ticker)",border:page===p?"none":"1px solid #d1d5db"}}>{p}</button>;
         })}
-        <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"#003399"}}>▶</button>
+        <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"var(--mio-ticker)"}}>▶</button>
       </div>}
       <button onClick={()=>window.scrollTo({top:0,behavior:"smooth"})}
         className="px-2 py-0.5 border border-gray-300 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-50">↑ Top</button>
@@ -791,7 +791,7 @@ export default function ScreenerPage() {
         <div className="px-3 py-1.5 border-b border-gray-200 bg-slate-50 flex items-center gap-2 text-xs shrink-0 shadow-sm">
           <button onClick={()=>setEditing("new")}
             className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
-            style={{backgroundColor:"#003366"}}>
+            style={{backgroundColor:"var(--mio-accent)"}}>
             + New Setup Scan
           </button>
           <button onClick={()=>setShowFavorites(v=>!v)}
@@ -860,7 +860,7 @@ export default function ScreenerPage() {
                 <div className="ml-auto flex rounded overflow-hidden border border-gray-200">
                   {(["overview","charts"] as const).map(v=>(
                     <button key={v} onClick={()=>setFavView(v)} className="px-2 py-0.5 text-[11px] capitalize"
-                      style={{backgroundColor:favView===v?"#003366":"white",color:favView===v?"white":"#003399",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                      style={{backgroundColor:favView===v?"var(--mio-accent)":"white",color:favView===v?"white":"var(--mio-ticker)",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
                       {v}
                     </button>
                   ))}
@@ -900,7 +900,7 @@ export default function ScreenerPage() {
                   <tbody>
                     {favPaged.map((r,idx)=>{
                       const up=(r.change_pct??0)>=0;
-                      const rc=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                      const rc=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
                       return <tr key={r.ticker} className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} border-b border-gray-100 transition-all`}>
                         <td className="px-1 py-1 text-center">
@@ -908,14 +908,14 @@ export default function ScreenerPage() {
                             className="text-base leading-none" style={{color:"#f59e0b"}}>★</button>
                         </td>
                         <td className="px-2 py-1 text-gray-400">{(page-1)*pageSize+idx+1}</td>
-                        <td className="px-2 py-1 font-bold whitespace-nowrap" style={{color:"#003399"}}>
+                        <td className="px-2 py-1 font-bold whitespace-nowrap" style={{color:"var(--mio-ticker)"}}>
                           {r.symbol}{r.new_52w_high&&<span className="ml-1 text-[9px] bg-green-100 text-green-700 rounded px-1">52H</span>}
                         </td>
                         <td className="px-2 py-1 max-w-[140px] truncate text-gray-700">{r.name}</td>
                         <td className="px-2 py-1"><span className="bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 text-[10px]">{r.sector}</span></td>
                         <td className="px-2 py-1"><span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span></td>
                         <td className="px-2 py-1 font-bold text-[13px] tabular-nums">{r.price?.toLocaleString()}</td>
-                        <td className="px-2 py-1 font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</td>
+                        <td className="px-2 py-1 font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</td>
                         <td className="px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
                           {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[9px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
                         </td>
@@ -932,9 +932,9 @@ export default function ScreenerPage() {
                             {r.macd_bullish?"▲ Bull":"▼ Bear"}
                           </span>
                         </td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"#16a34a":"#dc2626"}}>{r.sma20??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"#16a34a":"#dc2626"}}>{r.sma50??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
+                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"var(--mio-up)":"var(--mio-dn)"}}>{r.sma20??"—"}</td>
+                        <td className="px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"var(--mio-up)":"var(--mio-dn)"}}>{r.sma50??"—"}</td>
+                        <td className="px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
                         <td className="px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")}</td>
                         <td className="px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
                       </tr>;
@@ -948,14 +948,14 @@ export default function ScreenerPage() {
               <div ref={resultsRef} className="flex-1 overflow-auto p-3 flex flex-col gap-3">
                 {favPaged.map(r=>{
                   const up=(r.change_pct??0)>=0;
-                  const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                  const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
                   return (
                     <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm overflow-hidden w-full">
                       <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
                         <div className="flex items-center gap-2 min-w-[120px]">
                           <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
                             className="text-xl leading-none shrink-0" style={{color:"#f59e0b"}}>★</button>
-                          <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
+                          <span className="font-bold text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
                           {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -964,11 +964,11 @@ export default function ScreenerPage() {
                         </div>
                         <div className="text-right shrink-0">
                           <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
-                          <div className="text-sm font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                          <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
                         </div>
                         <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
                           <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
-                          <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
+                          <div style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
                           <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
                           {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
                           <a href={tvUrl(r.ticker)} target="_blank" rel="noopener noreferrer"
@@ -995,7 +995,7 @@ export default function ScreenerPage() {
               <div className="px-3 py-1.5 flex items-center gap-2 flex-wrap">
                 {active ? (
                   <>
-                    <span className="font-bold" style={{color:"#003366"}}>{active.name}</span>
+                    <span className="font-bold" style={{color:"var(--mio-accent)"}}>{active.name}</span>
                     <span className="text-gray-300">·</span>
                     <span className="text-gray-500">{active.exchange}</span>
                     {active.interval && active.interval !== "1d" && (
@@ -1015,7 +1015,7 @@ export default function ScreenerPage() {
                       void tick;
                       return <>
                         <span className="text-gray-300">·</span>
-                        <span className="font-semibold" style={{color:"#003366"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
+                        <span className="font-semibold" style={{color:"var(--mio-accent)"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
                         {scanDuration != null && <>
                           <span className="text-gray-300">·</span>
                           <span className="text-gray-400">{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
@@ -1128,7 +1128,7 @@ export default function ScreenerPage() {
                       {(["overview","charts"] as const).map(v=>(
                         <button key={v} onClick={()=>setView(v)}
                           className="px-3 py-1 text-[11px] font-medium capitalize transition-colors"
-                          style={{backgroundColor:view===v?"#003366":"white",color:view===v?"white":"#374151",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                          style={{backgroundColor:view===v?"var(--mio-accent)":"white",color:view===v?"white":"#374151",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
                           {v==="overview"?"📋 Table":"📈 Charts"}
                         </button>
                       ))}
@@ -1140,7 +1140,7 @@ export default function ScreenerPage() {
                           {(["sm","md","lg"] as const).map((s,i)=>(
                             <button key={s} onClick={()=>setChartSize(s)}
                               className="px-2 py-1 text-[10px] font-medium transition-colors"
-                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#003366":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"var(--mio-accent)":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
                               {s.toUpperCase()}
                             </button>
                           ))}
@@ -1148,11 +1148,11 @@ export default function ScreenerPage() {
                         <div className="flex border border-gray-200 rounded overflow-hidden">
                           <button onClick={()=>setChartCols(1)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#003366":"#888",borderRight:"1px solid #e5e7eb"}}
+                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"var(--mio-accent)":"#888",borderRight:"1px solid #e5e7eb"}}
                             title="1 column">▬</button>
                           <button onClick={()=>setChartCols(2)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#003366":"#888"}}
+                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"var(--mio-accent)":"#888"}}
                             title="2 columns">⊞</button>
                         </div>
                       </>
@@ -1171,9 +1171,9 @@ export default function ScreenerPage() {
                         <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
                           className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
                           style={{
-                            backgroundColor: sectorFilter===sec?"#003366":"#f1f5f9",
+                            backgroundColor: sectorFilter===sec?"var(--mio-accent)":"#f1f5f9",
                             color:           sectorFilter===sec?"white":"#475569",
-                            borderColor:     sectorFilter===sec?"#003366":"#e2e8f0",
+                            borderColor:     sectorFilter===sec?"var(--mio-accent)":"#e2e8f0",
                           }}>
                           {sec} <span className="opacity-70">{cnt}</span>
                         </button>
@@ -1271,12 +1271,12 @@ export default function ScreenerPage() {
                 <div className={`p-3 grid gap-3 ${chartCols===2?"grid-cols-2":"grid-cols-1"}`}>
                   {paged.map(r=>{
                     const up=(r.change_pct??0)>=0;
-                    const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"#dc2626":r.rsi<30?"#16a34a":"#222";
+                    const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
                     const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
                     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                     const dayCount = daysInScanMap[r.ticker];
                     return (
-                      <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "#003366" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
+                      <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "var(--mio-accent)" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
                         {chartCols===1 ? (
                           <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
                             <div className="flex items-center gap-2 min-w-[120px]">
@@ -1285,7 +1285,7 @@ export default function ScreenerPage() {
                                 style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
                                 {favorites[r.ticker] ? "★" : "☆"}
                               </button>
-                              <span className="font-bold text-base" style={{color:"#003399"}}>{r.symbol}</span>
+                              <span className="font-bold text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
                               {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
                               {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
@@ -1311,16 +1311,16 @@ export default function ScreenerPage() {
                             </div>
                             <div className="text-right shrink-0">
                               <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
-                              <div className="text-sm font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                              <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
                             </div>
                             <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
                               <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
-                              <div style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
+                              <div style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
                               <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
                               <div>{fmtCap(r.market_cap,active?.exchange??"NSE")}</div>
                               <div className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></div>
                               <div className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></div>
-                              <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
+                              <div className="text-gray-400">% 52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></div>
                               {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
                               <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
                                 className="ml-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap self-center"
@@ -1335,7 +1335,7 @@ export default function ScreenerPage() {
                                 style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
                                 {favorites[r.ticker] ? "★" : "☆"}
                               </button>
-                              <span className="font-bold text-sm" style={{color:"#003399"}}>{r.symbol}</span>
+                              <span className="font-bold text-sm" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[9px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
                               {isNew   &&<span className="text-[9px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
                               {isRepeat&&<span className="text-[9px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
@@ -1355,14 +1355,14 @@ export default function ScreenerPage() {
                               </div>
                               <div className="text-right shrink-0">
                                 <div className="font-semibold text-sm tabular-nums">{r.price?.toLocaleString()}</div>
-                                <div className="text-xs font-semibold tabular-nums" style={{color:up?"#16a34a":"#dc2626"}}>{up?"+":""}{r.change_pct}%</div>
+                                <div className="text-xs font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
                               </div>
                             </div>
                             <div className="flex gap-2.5 mt-1.5 text-[10px] text-gray-500 flex-wrap">
                               <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
-                              <span style={{color:r.macd_bullish?"#16a34a":"#dc2626",fontWeight:600}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</span>
+                              <span style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</span>
                               <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
-                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"#16a34a":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
+                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
                               {earnings[r.ticker] && <span style={{color:earningsColor(earnings[r.ticker]),fontWeight:600}}>E:{fmtEarnings(earnings[r.ticker])}</span>}
                               <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
                                 className="text-[10px] px-1 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
@@ -1384,7 +1384,7 @@ export default function ScreenerPage() {
                 <div className="text-5xl mb-4 opacity-40">🔍</div>
                 <div className="text-sm font-semibold text-gray-500 mb-1">No matches found</div>
                 <div className="text-xs text-gray-400 mb-1">
-                  <span className="font-medium" style={{color:"#003366"}}>{active.name}</span>
+                  <span className="font-medium" style={{color:"var(--mio-accent)"}}>{active.name}</span>
                   <span className="mx-1 text-gray-300">·</span>
                   <span>{active.exchange}</span>
                   {active.interval && active.interval !== "1d" && <>
