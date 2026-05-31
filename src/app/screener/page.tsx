@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, cloneElement } from "react";
 
 // ── Extracted modules ──────────────────────────────────────────────────────
 import type { SavedScreener, OHLCV, Result } from "./types";
@@ -568,6 +568,7 @@ export default function ScreenerPage() {
 
     return (
       <th
+        data-col={id}
         draggable={!isFixed}
         onDragStart={isFixed ? undefined : () => onColDragStart(id)}
         onDragOver={isFixed ? undefined : (e) => onColDragOver(e, id)}
@@ -788,7 +789,7 @@ export default function ScreenerPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* ── Action bar ──────────────────────────────────────────────────── */}
-        <div className="px-3 py-1.5 border-b border-gray-200 bg-slate-50 flex items-center gap-2 text-xs shrink-0 shadow-sm">
+        <div className="px-2 md:px-3 py-1.5 border-b border-gray-200 bg-slate-50 flex items-center flex-wrap gap-1.5 md:gap-2 text-xs shrink-0 shadow-sm">
           <button onClick={()=>setEditing("new")}
             className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
             style={{backgroundColor:"var(--mio-accent)"}}>
@@ -804,15 +805,15 @@ export default function ScreenerPage() {
             {showFavorites ? "★" : "☆"} Favorites ({Object.keys(favorites).length})
           </button>
 
-          {/* Recent scanners */}
+          {/* Recent scanners — hidden on mobile */}
           {recentScreeners.length > 0 && (
             <>
-              <div className="h-4 w-px bg-gray-200 mx-0.5 shrink-0"/>
-              <span className="text-[10px] text-gray-400 shrink-0">Recent:</span>
+              <div className="hidden md:block h-4 w-px bg-gray-200 mx-0.5 shrink-0"/>
+              <span className="hidden md:inline text-[10px] text-gray-400 shrink-0">Recent:</span>
               {recentScreeners.map(s => (
                 <button key={s.id} onClick={() => runScreen(s, asOfDate)}
                   title={s.formula}
-                  className="px-2.5 py-1 rounded border border-gray-200 text-[11px] text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors max-w-[130px] truncate flex items-center gap-1 shrink-0">
+                  className="hidden md:flex px-2.5 py-1 rounded border border-gray-200 text-[11px] text-gray-600 bg-white hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors max-w-[130px] truncate items-center gap-1 shrink-0">
                   <span className="text-gray-400 text-[10px]">↺</span>{s.name}
                 </button>
               ))}
@@ -827,9 +828,9 @@ export default function ScreenerPage() {
                 ↓ CSV
               </button>
             )}
-            {asOfDate && <span className="text-amber-600 text-[10px] font-semibold">← historical</span>}
+            {asOfDate && <span className="hidden md:inline text-amber-600 text-[10px] font-semibold">← historical</span>}
             <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)}
-              className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400" />
+              className="hidden md:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400" />
             {asOfDate && (
               <button onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
                 className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap">
@@ -1235,7 +1236,10 @@ export default function ScreenerPage() {
                       return (
                         <tr key={r.ticker}
                           className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#3b82f6]"} border-b border-gray-100 transition-all`}>
-                          {visibleCols.map(colId => renderCell(colId, r, idx))}
+                          {visibleCols.map(colId => {
+                            const cell = renderCell(colId, r, idx);
+                            return cell ? cloneElement(cell as React.ReactElement<{'data-col'?:string}>, { 'data-col': colId }) : null;
+                          })}
                         </tr>
                       );
                     })}

@@ -46,13 +46,14 @@ export default function Sidebar() {
   const pathname   = usePathname();
   const onScreener = pathname === "/screener";
 
-  const [collapsed,  setCollapsed]  = useState(false);
-  const [open,       setOpen]       = useState(true);
-  const [screeners,  setScreeners]  = useState<SavedScreener[]>(DEFAULTS);
-  const [activeId,   setActiveId]   = useState<string | null>(null);
-  const [width,      setWidth]      = useState(DEFAULT_WIDTH);
-  const [dragging,   setDragging]   = useState(false);
-  const [scanCounts, setScanCounts] = useState<Record<string, number>>({});
+  const [collapsed,   setCollapsed]  = useState(false);
+  const [open,        setOpen]       = useState(true);
+  const [screeners,   setScreeners]  = useState<SavedScreener[]>(DEFAULTS);
+  const [activeId,    setActiveId]   = useState<string | null>(null);
+  const [width,       setWidth]      = useState(DEFAULT_WIDTH);
+  const [dragging,    setDragging]   = useState(false);
+  const [scanCounts,  setScanCounts] = useState<Record<string, number>>({});
+  const [mobileOpen,  setMobileOpen] = useState(false);
 
   // Load persisted width on mount
   useEffect(() => {
@@ -74,17 +75,21 @@ export default function Sidebar() {
       const { id, count } = (e as CustomEvent<{ id: string; count: number }>).detail;
       setScanCounts(prev => ({ ...prev, [id]: count }));
     }
+    function onMobileToggle() { setMobileOpen(v => !v); }
     window.addEventListener("mio:screeners-changed", onChanged);
     window.addEventListener("mio:scan-active",       onActive);
     window.addEventListener("mio:scan-results",      onResults);
+    window.addEventListener("mio:sidebar-toggle",    onMobileToggle);
     return () => {
       window.removeEventListener("mio:screeners-changed", onChanged);
       window.removeEventListener("mio:scan-active",       onActive);
       window.removeEventListener("mio:scan-results",      onResults);
+      window.removeEventListener("mio:sidebar-toggle",    onMobileToggle);
     };
   }, [refresh]);
 
   useEffect(() => { if (onScreener) setOpen(true); }, [onScreener]);
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
 
   // ── Drag-to-resize ──────────────────────────────────────────────────────
   function startDrag(e: React.MouseEvent) {
@@ -125,8 +130,16 @@ export default function Sidebar() {
   }
 
   return (
+    <>
+    {/* Mobile backdrop — closes sidebar on tap-outside */}
+    {mobileOpen && (
+      <div
+        onClick={() => setMobileOpen(false)}
+        style={{ position: "fixed", inset: 0, zIndex: 99, background: "rgba(0,0,0,0.55)" }}
+      />
+    )}
     <aside
-      className="relative shrink-0 min-h-screen flex flex-col"
+      className={`relative shrink-0 min-h-screen flex flex-col${mobileOpen ? " mob-open" : ""}`}
       style={{
         width:           collapsed ? "2rem" : `${width}px`,
         backgroundColor: BG,
@@ -284,5 +297,6 @@ export default function Sidebar() {
         </>
       )}
     </aside>
+    </>
   );
 }

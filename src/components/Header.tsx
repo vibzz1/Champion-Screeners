@@ -23,15 +23,24 @@ export default function Header() {
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5" style={{ backgroundColor: "#0f172a" }}>
-      <Link href="/" className="flex items-center gap-2.5">
+    <div className="flex items-center justify-between px-3 md:px-4 py-2.5 border-b border-white/5" style={{ backgroundColor: "#0f172a" }}>
+      <div className="flex items-center gap-2">
+        {/* Hamburger — mobile only */}
+        <button
+          onClick={() => window.dispatchEvent(new CustomEvent("mio:sidebar-toggle"))}
+          className="md:hidden p-1.5 rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors text-lg leading-none"
+          aria-label="Open navigation">
+          ☰
+        </button>
+      <Link href="/" className="flex items-center gap-2">
         <span className="text-xl font-bold tracking-tight text-white">
           Market In<span style={{ color: "#f59e0b" }}>O</span>ut
         </span>
-        <span className="text-[10px] tracking-widest font-medium" style={{ color: "#475569" }}>
+        <span className="hidden sm:inline text-[10px] tracking-widest font-medium" style={{ color: "#475569" }}>
           STOCK SCREENER
         </span>
       </Link>
+      </div>
       <div className="flex items-center gap-3">
         <button
           onClick={toggleDark}

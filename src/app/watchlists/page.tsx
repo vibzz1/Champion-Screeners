@@ -86,7 +86,7 @@ export default function WatchlistsPage() {
     : null;
 
   return (
-    <div>
+    <div className="mob-page-pad md:p-0">
       <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Watch Lists</h2>
       {error && <p className="text-red-600 text-xs mb-2">{error}</p>}
 

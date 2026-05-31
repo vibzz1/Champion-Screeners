@@ -140,7 +140,7 @@ export default function BacktesterPage() {
   ] : [];
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl mob-page-pad md:p-0">
       <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Strategy Backtester</h2>
       <p className="text-xs text-gray-500 mb-4 leading-relaxed">
         Select a screener formula and an entry date. The backtester runs the formula on that date,

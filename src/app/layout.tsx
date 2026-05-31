@@ -14,11 +14,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="min-h-screen bg-white">
+      <body className="min-h-screen" style={{ background: "var(--mio-bg)" }}>
         <Header />
-        <div className="flex">
+        <div className="flex relative overflow-x-hidden">
           <Sidebar />
-          <main className="flex-1 p-4 overflow-auto">{children}</main>
+          <main className="flex-1 overflow-auto min-w-0 p-0 md:p-4">{children}</main>
         </div>
       </body>
     </html>
