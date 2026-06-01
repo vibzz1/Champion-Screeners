@@ -1375,6 +1375,15 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     # stitch onto history → save as today's cache.
     prev_cached = _load_intraday_cache_prev(exchange, bar_min)
     if prev_cached is not None:
+        if not _is_market_open(exchange):
+            # Market is closed (weekend, holiday, or outside trading hours).
+            # Skip top-up: period='1d' would fetch the last trading day's bars,
+            # which are already in prev_cached — stitch would duplicate them.
+            print(f"[screener] {exchange} {bar_min}min: {len(prev_cached)} tickers from prev cache "
+                  f"(market closed — skipping top-up to avoid duplicate bars)")
+            _SCREEN_PROGRESS.update({"phase": "cache", "done": len(prev_cached),
+                                     "total": len(prev_cached), "exchange": exchange, "bar_min": bar_min})
+            return prev_cached
         data = _topup_intraday(exchange, prev_cached, tickers, bar_min)
         if len(data) >= max(10, len(tickers) * 0.1):
             _save_intraday_cache(exchange, bar_min, data)
@@ -1483,8 +1492,9 @@ def _save_ohlcv_cache(exchange: str, data: Dict[str, pd.DataFrame]):
             f"(< 30% coverage). yfinance may be degraded."
         )
         return
-    # Remove old cache files for this exchange
-    for old in OHLCV_CACHE_DIR.glob(f"{exchange}_*.pkl"):
+    # Remove old daily cache files only — pattern matches "NSE_2026-05-30.pkl" style
+    # but NOT intraday files like "NSE_75min_2026-05-30.pkl".
+    for old in OHLCV_CACHE_DIR.glob(f"{exchange}_????-??-??.pkl"):
         try: old.unlink()
         except: pass
     with open(_ohlcv_cache_path(exchange), "wb") as f:
