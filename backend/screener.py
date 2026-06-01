@@ -2321,11 +2321,19 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     except Exception as e:
         print(f"[screener] nselib error ({type(e).__name__}) — using yfinance fallback")
 
-    # ── Fallback: yfinance today's bars (parallel) ───────────────────────────
-    if not result:
-        print("[screener] NSE live fallback: yfinance period=5d parallel …")
+    # ── Gap-fill: yfinance for any tickers nselib missed ─────────────────────
+    # Run for ALL missing tickers, not just when nselib returned zero.
+    # nselib may cover 1,900/2,000 tickers but miss stocks on upper/lower circuit,
+    # newly listed stocks, or those with data issues — those get no today's bar.
+    missing = [t for t in tickers if t not in result]
+    if missing:
+        if result:
+            print(f"[screener] NSE live: nselib covered {len(result)}/{len(tickers)}; "
+                  f"yfinance gap-fill for {len(missing)} missing tickers…")
+        else:
+            print("[screener] NSE live: nselib returned 0 — yfinance fallback for all…")
         today_str = datetime.date.today().isoformat()
-        batches = [tickers[i: i + DOWNLOAD_BATCH] for i in range(0, len(tickers), DOWNLOAD_BATCH)]
+        batches = [missing[i: i + DOWNLOAD_BATCH] for i in range(0, len(missing), DOWNLOAD_BATCH)]
 
         def _live_batch(batch):
             batch_result = {}
@@ -2374,11 +2382,14 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
             return batch_result
 
         try:
+            gap_result: Dict[str, Dict] = {}
             for batch_result in _EXECUTOR.map(_live_batch, batches):
-                result.update(batch_result)
-            print(f"[screener] NSE live (yfinance fallback): {len(result)}/{len(tickers)} bars")
+                gap_result.update(batch_result)
+            result.update(gap_result)
+            print(f"[screener] NSE live (yfinance gap-fill): +{len(gap_result)} tickers → "
+                  f"total {len(result)}/{len(tickers)}")
         except Exception as e:
-            print(f"[screener] NSE live fallback error: {type(e).__name__}: {e}")
+            print(f"[screener] NSE live gap-fill error: {type(e).__name__}: {e}")
 
     return result
 
