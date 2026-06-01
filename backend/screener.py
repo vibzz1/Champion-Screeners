@@ -1328,8 +1328,56 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
             and str(df.index[-1])[:10] == today_str
             for t in list(cached.keys())[:20]
         )
+        # ── Background top-up helper (used by both stale-today and no-today paths) ──
+        import threading as _thr
+        def _spawn_bg_topup(reason: str):
+            def _bg_topup(exch=exchange, prev=cached, tks=tickers, bm=bar_min, ts=today_str):
+                try:
+                    data = _topup_intraday(exch, prev, tks, bm)
+                    today_count = sum(
+                        1 for t, df in data.items()
+                        if df is not None and not df.empty
+                        and str(df.index[-1])[:10] == ts
+                    )
+                    if today_count > 0:
+                        _save_intraday_cache(exch, bm, data)
+                        print(f"[screener] BG top-up done ({reason}): {exch} {bm}min "
+                              f"— {today_count} tickers updated")
+                    else:
+                        print(f"[screener] BG top-up ({reason}): 0 today-bars "
+                              f"(too early for first complete bar)")
+                except Exception as e:
+                    print(f"[screener] BG top-up error ({exch} {bm}min): {e}")
+            _thr.Thread(target=_bg_topup, daemon=True).start()
+
         if has_today:
-            print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache (today ✓)")
+            # Cache has today's bars — but check if they're stale.
+            # The 10:45 prewarm saves bar-1 only; subsequent bars are never
+            # fetched unless we detect that the latest cached bar is old.
+            if _is_market_open(exchange):
+                try:
+                    tz_name = ("Asia/Kolkata"   if exchange in ("NSE", "BSE") else
+                               "Asia/Seoul"     if exchange in ("KOSPI", "KOSDAQ") else
+                               "Asia/Tokyo"     if exchange == "TSE" else
+                               "Europe/Berlin"  if exchange == "XETRA" else
+                               "America/New_York")
+                    now_local = datetime.datetime.now(tz=pytz.timezone(tz_name))
+                    latest_ts = max(
+                        (df.index[-1] for t in list(cached.keys())[:20]
+                         if (df := cached.get(t)) is not None and not df.empty),
+                        default=None,
+                    )
+                    if latest_ts is not None:
+                        elapsed_min = (now_local - latest_ts.tz_localize(tz_name)).total_seconds() / 60
+                        if elapsed_min >= bar_min:
+                            print(f"[screener] {exchange} {bar_min}min: latest bar is "
+                                  f"{elapsed_min:.0f}m ago — background top-up for new bars")
+                            _spawn_bg_topup("stale-today")
+                        else:
+                            print(f"[screener] {exchange} {bar_min}min: cache current "
+                                  f"({elapsed_min:.0f}m since last bar)")
+                except Exception:
+                    pass  # tz edge-case — serve stale cache, no top-up
             _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached),
                                      "total": len(cached), "exchange": exchange, "bar_min": bar_min})
             return cached
@@ -1341,25 +1389,7 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
         if _is_market_open(exchange):
             print(f"[screener] {exchange} {bar_min}min: cache has no today-bars — "
                   f"returning history; background top-up triggered for next scan")
-            def _bg_topup(exch=exchange, prev=cached, tks=tickers, bm=bar_min, ts=today_str):
-                try:
-                    data = _topup_intraday(exch, prev, tks, bm)
-                    today_count = sum(
-                        1 for t, df in data.items()
-                        if df is not None and not df.empty
-                        and str(df.index[-1])[:10] == ts
-                    )
-                    if today_count > 0:
-                        _save_intraday_cache(exch, bm, data)
-                        print(f"[screener] BG top-up done: {exch} {bm}min "
-                              f"({today_count} tickers have today's bars)")
-                    else:
-                        print(f"[screener] BG top-up: {exch} {bm}min got 0 today-bars "
-                              f"(too early for first complete bar)")
-                except Exception as e:
-                    print(f"[screener] BG top-up error ({exch} {bm}min): {e}")
-            import threading as _thr
-            _thr.Thread(target=_bg_topup, daemon=True).start()
+            _spawn_bg_topup("no-today")
         else:
             print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache "
                   f"(market closed, no today-bars expected)")
