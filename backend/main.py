@@ -35,8 +35,8 @@ def _prewarm_daily_background():
         print(f"[prewarm] daily background error: {e}")
 
 def _prewarm_intraday_background():
-    """Warm intraday OHLCV cache — runs at 09:45 IST (4:15 UTC) Mon–Fri.
-    Scheduled 30 min after NSE opens (09:15 IST) so today's bars exist."""
+    """Warm intraday OHLCV cache — runs at 10:45 IST (5:15 UTC) Mon–Fri.
+    First complete 75-min bar closes at 10:30 IST; 10:45 gives 15-min margin."""
     try:
         prewarm_intraday_ohlcv_cache([("NSE", 75)])
     except Exception as e:
@@ -88,10 +88,10 @@ async def startup_event():
             id="nse_prewarm_daily",
             replace_existing=True,
         )
-        # Intraday OHLCV: 09:45 IST = 04:15 UTC  (30 min after NSE open)
+        # Intraday OHLCV: 10:45 IST = 05:15 UTC  (15 min after first complete 75-min bar)
         scheduler.add_job(
             _prewarm_intraday_background,
-            CronTrigger(hour=4, minute=15, day_of_week="mon-fri", timezone=pytz.utc),
+            CronTrigger(hour=5, minute=15, day_of_week="mon-fri", timezone=pytz.utc),
             id="nse_prewarm_intraday",
             replace_existing=True,
         )
@@ -112,7 +112,7 @@ async def startup_event():
             replace_existing=True,
         )
         scheduler.start()
-        print("[prewarm] Scheduler started — daily@08:00IST, intraday@09:45IST, bhavcopy@19:00IST (Mon–Fri)")
+        print("[prewarm] Scheduler started — daily@08:00IST, intraday@10:45IST, bhavcopy@19:00IST (Mon–Fri)")
     except Exception as e:
         print(f"[prewarm] Scheduler setup failed: {e}")
 
@@ -263,6 +263,21 @@ def clear_ohlcv_cache(exchange: str = None):
     errors = []
     if OHLCV_CACHE_DIR.exists():
         pattern = f"{exchange}_*.pkl" if exchange else "*.pkl"
+        for f in OHLCV_CACHE_DIR.glob(pattern):
+            try:
+                f.unlink()
+                deleted.append(f.name)
+            except Exception as e:
+                errors.append(f"{f.name}: {e}")
+    return {"deleted": deleted, "errors": errors, "count": len(deleted)}
+
+@app.post("/api/cache/clear-intraday")
+def clear_intraday_cache(exchange: str = "NSE", bar_min: int = 75):
+    """Delete only today's intraday cache file so the next scan does a fresh top-up.
+    Leaves the daily OHLCV cache untouched."""
+    deleted, errors = [], []
+    if OHLCV_CACHE_DIR.exists():
+        pattern = f"{exchange}_{bar_min}min_*.pkl"
         for f in OHLCV_CACHE_DIR.glob(pattern):
             try:
                 f.unlink()
