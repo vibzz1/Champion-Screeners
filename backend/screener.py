@@ -1318,9 +1318,50 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
     # ── Fast path: today's intraday cache already exists ─────────────────────
     cached = _load_intraday_cache(exchange, bar_min)
     if cached is not None:
-        print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache")
-        _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": bar_min})
-        return cached
+        today_str = datetime.date.today().isoformat()
+        # Check whether any cached ticker actually has a bar stamped today.
+        # If the cache was saved by the 09:45 prewarm (before the first complete
+        # 75-min bar at 10:30), it contains only yesterday's history.
+        # In that case, during market hours we must top-up to add today's bars.
+        has_today = any(
+            (df := cached.get(t)) is not None and not df.empty
+            and str(df.index[-1])[:10] == today_str
+            for t in list(cached.keys())[:20]
+        )
+        if has_today:
+            print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache (today ✓)")
+            _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached),
+                                     "total": len(cached), "exchange": exchange, "bar_min": bar_min})
+            return cached
+
+        # Cache exists but no today's bars ─────────────────────────────────────
+        if _is_market_open(exchange):
+            # Market is open → attempt top-up so today's complete bars are included.
+            # Use the stale today-file as prev_data (already has multi-day history).
+            print(f"[screener] {exchange} {bar_min}min: cache loaded but no today's bars — "
+                  f"market is open, running top-up…")
+            data = _topup_intraday(exchange, cached, tickers, bar_min)
+            today_count = sum(
+                1 for t, df in data.items()
+                if df is not None and not df.empty and str(df.index[-1])[:10] == today_str
+            )
+            if today_count > 0:
+                _save_intraday_cache(exchange, bar_min, data)
+                print(f"[screener] {exchange} {bar_min}min: re-saved with today's bars "
+                      f"({today_count} tickers updated)")
+            else:
+                print(f"[screener] {exchange} {bar_min}min: top-up returned 0 today-bars "
+                      f"(pre-first-complete-bar); returning history only")
+            _SCREEN_PROGRESS.update({"phase": "cache", "done": len(data),
+                                     "total": len(data), "exchange": exchange, "bar_min": bar_min})
+            return data
+        else:
+            # Market closed — no today bars expected, stale cache is fine
+            print(f"[screener] {exchange} {bar_min}min: {len(cached)} tickers from cache "
+                  f"(market closed, today's bars not expected)")
+            _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached),
+                                     "total": len(cached), "exchange": exchange, "bar_min": bar_min})
+            return cached
 
     # ── Top-up path: yesterday's history + today's 15-min bars ───────────────
     # Avoids a full 60-day re-download (~5-7 min) every morning.
