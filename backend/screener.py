@@ -2378,14 +2378,17 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
         def _live_batch(batch):
             batch_result = {}
             try:
-                raw = yf.download(batch, period="5d", interval="1d",
+                # Use 5-min bars so today's partial session is always included.
+                # period="5d" interval="1d" only returns COMPLETE daily bars —
+                # today's bar doesn't exist until after market close, so the
+                # today_str check fails and every ticker gets skipped.
+                raw = yf.download(batch, period="1d", interval="5m",
                                   auto_adjust=True, progress=False,
                                   group_by="ticker", threads=True)
                 if raw is None or raw.empty:
                     return batch_result
                 for ticker in batch:
                     try:
-                        # Direct extraction — do NOT use _normalize_df (requires ≥30 rows)
                         if isinstance(raw.columns, pd.MultiIndex):
                             lvl0 = raw.columns.get_level_values(0).unique().tolist()
                             lvl1 = (raw.columns.get_level_values(1).unique().tolist()
@@ -2405,15 +2408,16 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
                                      if c in df_t.columns]].dropna(subset=["Close"])
                         if df_t.empty or "Close" not in df_t.columns:
                             continue
+                        # 5-min bars: check that at least one bar is from today
                         if str(df_t.index[-1])[:10] != today_str:
                             continue
-                        row = df_t.iloc[-1]
+                        # Aggregate to a single today-OHLCV bar
                         batch_result[ticker] = {
-                            "open":   float(row["Open"]),
-                            "high":   float(row["High"]),
-                            "low":    float(row["Low"]),
-                            "close":  float(row["Close"]),
-                            "volume": int(float(row.get("Volume", 0))),
+                            "open":   float(df_t["Open"].iloc[0]),
+                            "high":   float(df_t["High"].max()),
+                            "low":    float(df_t["Low"].min()),
+                            "close":  float(df_t["Close"].iloc[-1]),
+                            "volume": int(df_t["Volume"].sum()) if "Volume" in df_t.columns else 0,
                         }
                     except Exception:
                         continue
