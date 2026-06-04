@@ -2639,11 +2639,13 @@ def prewarm_intraday_ohlcv_cache(exchange_bars: List[tuple] = None) -> None:
             tickers = UNIVERSES.get(exchange, [])
             if not tickers:
                 continue
-            cached = _load_intraday_cache(exchange, bar_min)
-            if cached is not None:
-                print(f"[prewarm] {exchange} {bar_min}min: cache fresh ({len(cached)} tickers) — skip")
+            # Check TODAY's file specifically — _load_intraday_cache falls back to
+            # yesterday, which would cause the prewarm to skip even though no
+            # today's cache exists yet.
+            if _ohlcv_intraday_cache_path(exchange, bar_min).exists():
+                print(f"[prewarm] {exchange} {bar_min}min: today's cache exists — skip")
                 continue
-            print(f"[prewarm] {exchange} {bar_min}min: cache stale — downloading {len(tickers)} tickers…")
+            print(f"[prewarm] {exchange} {bar_min}min: no today's cache — running top-up…")
             _download_intraday_ohlcv(exchange, tickers, bar_min)
             print(f"[prewarm] {exchange} {bar_min}min: done ✓")
         except Exception as e:
