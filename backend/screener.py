@@ -2548,14 +2548,25 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     # Stage 1: Historical OHLCV (cache or download)
     ohlcv_data = _download_ohlcv(exchange, tickers)
 
-    # Stage 2: Live bar injection during market hours (current-day scans only)
+    # Stage 2: Live bar injection — runs whenever today's bar is missing from cache.
+    # This covers two windows:
+    #   a) During market hours (9:15–15:30 IST): partial today bar with live price.
+    #   b) Post-close before Bhavcopy update (15:30–19:00 IST): today's final close.
+    # After Bhavcopy updates (~19:00 IST) the cache has today's date → injection skips.
     live_bars: Dict[str, Dict] = {}
-    if not as_of_date and _is_market_open(exchange):
-        print(f"[screener] {exchange}: market open — injecting live bars…")
-        if exchange in ("NSE", "BSE"):
-            live_bars = _fetch_live_nse_bars(tickers)
-        else:
-            live_bars = _fetch_live_us_bars(tickers)
+    if not as_of_date:
+        today_str = datetime.date.today().isoformat()
+        cache_has_today = any(
+            (df := ohlcv_data.get(t)) is not None and not df.empty
+            and str(df.index[-1])[:10] == today_str
+            for t in list(tickers)[:10]
+        )
+        if not cache_has_today:
+            print(f"[screener] {exchange}: today's bar missing from cache — injecting…")
+            if exchange in ("NSE", "BSE"):
+                live_bars = _fetch_live_nse_bars(tickers)
+            else:
+                live_bars = _fetch_live_us_bars(tickers)
 
     # Stage 3: Compute indicators + filter — parallel across all tickers
     _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": 0})
