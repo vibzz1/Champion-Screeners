@@ -1032,6 +1032,12 @@ _SCREEN_PROGRESS: dict = {
 # Tracks the last intraday top-up result — readable via /api/angel/status
 _LAST_TOPUP: dict = {}
 
+# Prevents concurrent background top-ups for the same exchange+bar_min pair.
+# Without this, rapid successive scans spawn N threads all hitting the same data.
+import threading as _topup_threading
+_TOPUP_RUNNING: set = set()
+_TOPUP_RUNNING_LOCK = _topup_threading.Lock()
+
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
 
@@ -1064,7 +1070,8 @@ def _load_intraday_cache(exchange: str, bar_min: int) -> Optional[Dict[str, pd.D
         p = OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{d.isoformat()}.pkl"
         if p.exists():
             try:
-                data = pickle.load(open(p, "rb"))
+                with open(p, "rb") as f:
+                    data = pickle.load(f)
                 if days_back > 0:
                     print(f"[screener] {exchange} {bar_min}min: loaded yesterday's cache ({d})")
                 return data
@@ -1153,7 +1160,8 @@ def _load_intraday_cache_prev(exchange: str, bar_min: int) -> Optional[Dict[str,
         p = OHLCV_CACHE_DIR / f"{exchange}_{bar_min}min_{d.isoformat()}.pkl"
         if p.exists():
             try:
-                data = pickle.load(open(p, "rb"))
+                with open(p, "rb") as f:
+                    data = pickle.load(f)
                 print(f"[screener] {exchange} {bar_min}min: loaded {days_back}d-old intraday cache for top-up")
                 return data
             except Exception:
@@ -1298,13 +1306,19 @@ def _topup_intraday(
         hist = prev_data.get(ticker)
         td   = today_bars.get(ticker)
         if hist is not None:
-            # Guard: strip any stale "today" rows that might linger in prev_data
-            try:
-                mask = hist.index.normalize() >= ts_today
-                hist = hist[~mask]
-            except Exception:
-                pass
-            merged[ticker] = pd.concat([hist, td]) if td is not None else hist
+            if td is not None:
+                # Strip stale "today" rows from prev_data, then append fresh ones.
+                # IMPORTANT: only strip when we have fresh bars to replace them.
+                # If td is None (top-up failed for this ticker), keep hist intact —
+                # stripping without replacing would silently lose today's bars.
+                try:
+                    mask = hist.index.normalize() >= ts_today
+                    hist = hist[~mask]
+                except Exception:
+                    pass
+                merged[ticker] = pd.concat([hist, td])
+            else:
+                merged[ticker] = hist  # top-up missed this ticker — preserve existing bars
         # Skip tickers with today's bars only — too few rows for SMA(50)
     return merged
 
@@ -1331,6 +1345,13 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
         # ── Background top-up helper (used by both stale-today and no-today paths) ──
         import threading as _thr
         def _spawn_bg_topup(reason: str):
+            key = f"{exchange}_{bar_min}"
+            with _TOPUP_RUNNING_LOCK:
+                if key in _TOPUP_RUNNING:
+                    print(f"[screener] BG top-up ({reason}): {key} already running — skip")
+                    return
+                _TOPUP_RUNNING.add(key)
+
             def _bg_topup(exch=exchange, prev=cached, tks=tickers, bm=bar_min, ts=today_str):
                 try:
                     data = _topup_intraday(exch, prev, tks, bm)
@@ -1348,6 +1369,9 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                               f"(too early for first complete bar)")
                 except Exception as e:
                     print(f"[screener] BG top-up error ({exch} {bm}min): {e}")
+                finally:
+                    with _TOPUP_RUNNING_LOCK:
+                        _TOPUP_RUNNING.discard(key)
             _thr.Thread(target=_bg_topup, daemon=True).start()
 
         if has_today:
@@ -1369,13 +1393,18 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                     )
                     if latest_ts is not None:
                         elapsed_min = (now_local - latest_ts.tz_localize(tz_name)).total_seconds() / 60
-                        if elapsed_min >= bar_min:
+                        # Fire top-up only when the NEXT bar has completed.
+                        # elapsed is measured from the START of the last cached bar.
+                        # The next bar starts at elapsed=bar_min and COMPLETES at
+                        # elapsed=bar_min*2.  Firing at bar_min would top-up too early —
+                        # the new bar is still forming and _resample_intraday would drop it.
+                        if elapsed_min >= bar_min * 2:
                             print(f"[screener] {exchange} {bar_min}min: latest bar is "
-                                  f"{elapsed_min:.0f}m ago — background top-up for new bars")
+                                  f"{elapsed_min:.0f}m ago (≥{bar_min*2}m) — bg top-up for next bar")
                             _spawn_bg_topup("stale-today")
                         else:
                             print(f"[screener] {exchange} {bar_min}min: cache current "
-                                  f"({elapsed_min:.0f}m since last bar)")
+                                  f"({elapsed_min:.0f}m since last bar, next fires at {bar_min*2}m)")
                 except Exception:
                     pass  # tz edge-case — serve stale cache, no top-up
             _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached),
@@ -2357,9 +2386,9 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
         else:
             print(f"[screener] NSE live: nselib column mismatch {list(df.columns)[:6]}")
     except ImportError:
-        print("[screener] nselib not available — using yfinance fallback")
+        print("[screener] nselib not installed — using yfinance fallback")
     except Exception as e:
-        print(f"[screener] nselib error ({type(e).__name__}) — using yfinance fallback")
+        print(f"[screener] nselib error ({type(e).__name__}: {e}) — using yfinance fallback")
 
     # ── Gap-fill: yfinance for any tickers nselib missed ─────────────────────
     # Run for ALL missing tickers, not just when nselib returned zero.

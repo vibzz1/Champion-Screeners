@@ -255,6 +255,54 @@ def cache_status():
         "files": files,
     }
 
+@app.get("/api/intraday/status")
+def intraday_status():
+    """Single diagnostic endpoint — answers: does today's intraday cache exist?
+    what is the last bar date? is a top-up running? Hit this at any point during
+    market hours to verify the pipeline is healthy without reading logs."""
+    import datetime, pickle, pytz
+    from screener import (OHLCV_CACHE_DIR, _LAST_TOPUP, _TOPUP_RUNNING,
+                          _is_market_open, _ohlcv_intraday_cache_path)
+
+    today = datetime.date.today().isoformat()
+    exchange, bar_min = "NSE", 75
+    cache_path = _ohlcv_intraday_cache_path(exchange, bar_min)
+
+    result = {
+        "today": today,
+        "market_open": _is_market_open(exchange),
+        "cache_file": cache_path.name,
+        "cache_exists": cache_path.exists(),
+        "cache_size_mb": round(cache_path.stat().st_size / 1_048_576, 1) if cache_path.exists() else None,
+        "topup_running": list(_TOPUP_RUNNING),
+        "last_topup": dict(_LAST_TOPUP) or None,
+        "last_bar_date": None,
+        "today_bar_count": None,
+        "verdict": None,
+    }
+
+    if cache_path.exists():
+        try:
+            with open(cache_path, "rb") as f:
+                data = pickle.load(f)
+            sample = [df for df in (data.get(t) for t in list(data.keys())[:20]) if df is not None and not df.empty]
+            if sample:
+                last_dates = sorted(set(str(df.index[-1])[:10] for df in sample), reverse=True)
+                result["last_bar_date"] = last_dates[0]
+                result["today_bar_count"] = sum(1 for df in sample if str(df.index[-1])[:10] == today)
+        except Exception as e:
+            result["cache_read_error"] = str(e)
+
+    # Verdict
+    if not cache_path.exists():
+        result["verdict"] = "⚠ No today's cache — prewarm hasn't run or failed"
+    elif result["last_bar_date"] == today:
+        result["verdict"] = "✅ Today's bars present"
+    else:
+        result["verdict"] = f"⚠ Cache has {result['last_bar_date']} bars, not today's — top-up pending"
+
+    return result
+
 @app.post("/api/cache/clear")
 def clear_ohlcv_cache(exchange: str = None):
     """Delete OHLCV cache files so the next scan triggers a fresh download.
