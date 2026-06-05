@@ -111,6 +111,7 @@ export default function ScreenerPage() {
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(1);
+  const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
   const [recentScreeners, setRecent] = useState<SavedScreener[]>([]);
   const [scanDuration, setScanDuration] = useState<number | null>(null);
   const [restored,     setRestored]     = useState(false); // true when showing cached last-scan
@@ -126,6 +127,14 @@ export default function ScreenerPage() {
   const [showColMenu, setShowColMenu] = useState(false);
   const [dragCol,     setDragCol]     = useState<ColId | null>(null);
   const [dropCol,     setDropCol]     = useState<ColId | null>(null);
+
+  // Force mobile-safe defaults on narrow screens
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 640) {
+      setChartCols(1);
+      setChartSize("sm");
+    }
+  }, []);
 
   // Load column prefs from localStorage
   useEffect(() => {
@@ -793,7 +802,8 @@ export default function ScreenerPage() {
           <button onClick={()=>setEditing("new")}
             className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
             style={{backgroundColor:"var(--mio-accent)"}}>
-            + New Setup Scan
+            <span className="hidden sm:inline">+ New Setup Scan</span>
+            <span className="sm:hidden">+ New</span>
           </button>
           <button onClick={()=>setShowFavorites(v=>!v)}
             className="px-3 py-1 rounded text-[11px] font-semibold border flex items-center gap-1"
@@ -802,7 +812,7 @@ export default function ScreenerPage() {
               borderColor:     showFavorites ? "#f59e0b" : "#d1d5db",
               color:           showFavorites ? "#b45309" : "#374151",
             }}>
-            {showFavorites ? "★" : "☆"} Favorites ({Object.keys(favorites).length})
+            {showFavorites ? "★" : "☆"} <span className="hidden sm:inline">Favorites </span>({Object.keys(favorites).length})
           </button>
 
           {/* Recent scanners — hidden on mobile */}
@@ -952,28 +962,30 @@ export default function ScreenerPage() {
                   const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
                   return (
                     <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm overflow-hidden w-full">
-                      <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
-                        <div className="flex items-center gap-2 min-w-[120px]">
-                          <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
-                            className="text-xl leading-none shrink-0" style={{color:"#f59e0b"}}>★</button>
-                          <span className="font-bold text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
-                          {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                      <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
+                        <div className="flex items-start gap-2 mb-1.5">
+                          <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                            <button onClick={()=>toggleFavorite(r)} title="Remove from favorites"
+                              className="text-lg leading-none" style={{color:"#f59e0b"}}>★</button>
+                            <span className="font-bold text-sm sm:text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
+                            {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
+                            <span className="text-[11px] text-gray-400 truncate block">{r.sector} · {r.industry}</span>
+                          </div>
+                          <div className="text-right shrink-0 ml-1">
+                            <div className="font-bold text-base sm:text-lg tabular-nums">{r.price?.toLocaleString()}</div>
+                            <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
-                          <span className="text-[11px] text-gray-400">{r.sector} · {r.industry}</span>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
-                          <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
-                        </div>
-                        <div className="flex gap-4 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
-                          <div>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></div>
-                          <div style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</div>
-                          <div>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></div>
-                          {earnings[r.ticker] && <div className="text-gray-400">Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></div>}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                          <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
+                          <span style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</span>
+                          <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
+                          {earnings[r.ticker] && <span>Earnings <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></span>}
                           <a href={tvUrl(r.ticker)} target="_blank" rel="noopener noreferrer"
-                            className="ml-1 shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap self-center"
+                            className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
                             title="Open on TradingView">TV ↗</a>
                         </div>
                       </div>
@@ -1055,27 +1067,20 @@ export default function ScreenerPage() {
                 {error && <span className="text-red-500">{error}</span>}
                 {warning && <span className="text-amber-600 text-[10px] max-w-lg leading-tight">{warning}</span>}
 
-                {/* View tabs — right side */}
+                {/* View toggle + chart controls — always right-aligned, mobile-safe */}
                 {!loading && results.length>0 && (
-                  <div className="ml-auto flex items-center gap-2 flex-wrap">
-                    {/* Search */}
-                    <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
-                      <input value={resultSearch} onChange={e=>setRS(e.target.value)}
-                        placeholder="Search symbol / name…"
-                        className="border border-gray-200 rounded pl-6 pr-2 py-0.5 text-[11px] bg-white w-44 focus:outline-none focus:border-blue-400"/>
-                    </div>
-                    {/* Sector + Cap filters */}
-                    <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={sectorFilter} onChange={e=>{setSF(e.target.value);setRS("");}}>
+                  <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                    {/* Sector + Cap filters — desktop only (sector chips below handle mobile) */}
+                    <select className="hidden sm:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={sectorFilter} onChange={e=>{setSF(e.target.value);setRS("");}}>
                       {sectors.map(s=><option key={s}>{s}</option>)}
                     </select>
-                    <select className="border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
+                    <select className="hidden sm:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
                       {["All","Mega","Large","Mid","Small"].map(c=><option key={c}>{c}</option>)}
                     </select>
 
-                    {/* Columns button */}
+                    {/* Columns button — desktop only */}
                     {view === "overview" && (
-                      <div className="relative">
+                      <div className="hidden sm:block relative">
                         <button
                           onClick={() => setShowColMenu(v => !v)}
                           className="px-2.5 py-1 rounded border text-[11px] flex items-center gap-1 transition-colors"
@@ -1124,20 +1129,21 @@ export default function ScreenerPage() {
                       </div>
                     )}
 
-                    {/* View toggle */}
+                    {/* View toggle — always visible */}
                     <div className="flex border border-gray-200 rounded overflow-hidden">
                       {(["overview","charts"] as const).map(v=>(
                         <button key={v} onClick={()=>setView(v)}
-                          className="px-3 py-1 text-[11px] font-medium capitalize transition-colors"
+                          className="px-2 sm:px-3 py-1 text-[11px] font-medium transition-colors"
                           style={{backgroundColor:view===v?"var(--mio-accent)":"white",color:view===v?"white":"#374151",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
-                          {v==="overview"?"📋 Table":"📈 Charts"}
+                          <span className="hidden sm:inline">{v==="overview"?"📋 Table":"📈 Charts"}</span>
+                          <span className="sm:hidden">{v==="overview"?"Table":"Charts"}</span>
                         </button>
                       ))}
                     </div>
-                    {/* Chart controls */}
+                    {/* Chart size + column controls — desktop only */}
                     {view==="charts" && (
                       <>
-                        <div className="flex border border-gray-200 rounded overflow-hidden">
+                        <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
                           {(["sm","md","lg"] as const).map((s,i)=>(
                             <button key={s} onClick={()=>setChartSize(s)}
                               className="px-2 py-1 text-[10px] font-medium transition-colors"
@@ -1146,7 +1152,7 @@ export default function ScreenerPage() {
                             </button>
                           ))}
                         </div>
-                        <div className="flex border border-gray-200 rounded overflow-hidden">
+                        <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
                           <button onClick={()=>setChartCols(1)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
                             style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"var(--mio-accent)":"#888",borderRight:"1px solid #e5e7eb"}}
@@ -1161,6 +1167,29 @@ export default function ScreenerPage() {
                   </div>
                 )}
               </div>
+
+              {/* Search row — full-width on mobile, hidden on desktop (desktop has it in the right group above) */}
+              {!loading && results.length>0 && (
+                <div className="sm:hidden px-3 pb-1.5 flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
+                    <input value={resultSearch} onChange={e=>setRS(e.target.value)}
+                      placeholder="Search symbol / name…"
+                      className="border border-gray-200 rounded pl-6 pr-2 py-1.5 text-[11px] bg-white w-full focus:outline-none focus:border-blue-400"/>
+                  </div>
+                </div>
+              )}
+              {/* Search row desktop — keep in the right toolbar group (sm:block version) */}
+              {!loading && results.length>0 && (
+                <div className="hidden sm:flex px-3 pb-1.5 items-center gap-2">
+                  <div className="relative">
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
+                    <input value={resultSearch} onChange={e=>setRS(e.target.value)}
+                      placeholder="Search symbol / name…"
+                      className="border border-gray-200 rounded pl-6 pr-2 py-0.5 text-[11px] bg-white w-44 focus:outline-none focus:border-blue-400"/>
+                  </div>
+                </div>
+              )}
 
               {/* Row 2: sector chips */}
               {!loading && sectorCounts.length>0 && (
@@ -1282,59 +1311,59 @@ export default function ScreenerPage() {
                     return (
                       <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "var(--mio-accent)" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
                         {chartCols===1 ? (
-                          <div className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-100">
-                            <div className="flex items-center gap-2 min-w-[120px]">
-                              <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
-                                className="text-xl leading-none transition-colors shrink-0"
-                                style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
-                                {favorites[r.ticker] ? "★" : "☆"}
-                              </button>
-                              <span className="font-bold text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
-                              {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                              {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
-                              {isRepeat&&<span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
-                              {dayCount != null && dayCount > 1 && (
-                                <span className="text-[10px] px-1 rounded font-bold"
-                                  style={{ backgroundColor: dayCount >= 3 ? "#dcfce7" : "#fef9c3", color: dayCount >= 3 ? "#15803d" : "#92400e" }}>
-                                  {dayCount}d
+                          /* Mobile-first: stack identity row + stats row vertically */
+                          <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
+                            {/* Row 1: star + symbol + badges | company | price */}
+                            <div className="flex items-start gap-2 mb-1.5">
+                              <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                                <button onClick={()=>toggleFavorite(r)} title={favorites[r.ticker]?"Remove from favorites":"Add to favorites"}
+                                  className="text-lg leading-none transition-colors"
+                                  style={{color: favorites[r.ticker] ? "#f59e0b" : "#d1d5db"}}>
+                                  {favorites[r.ticker] ? "★" : "☆"}
+                                </button>
+                                <span className="font-bold text-sm sm:text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
+                                {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
+                                {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
+                                {isRepeat&&<span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
+                                {dayCount != null && dayCount > 1 && (
+                                  <span className="text-[10px] px-1 rounded font-bold"
+                                    style={{ backgroundColor: dayCount >= 3 ? "#dcfce7" : "#fef9c3", color: dayCount >= 3 ? "#15803d" : "#92400e" }}>
+                                    {dayCount}d
+                                  </span>
+                                )}
+                                {watchlistSyms.has(r.symbol) && (
+                                  <span className="text-[10px] px-1 rounded font-bold" title="In your watchlist"
+                                    style={{ backgroundColor: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d" }}>WL</span>
+                                )}
+                                <span className="rounded px-1 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
+                                <span className="text-[11px] text-gray-400 truncate block">
+                                  <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}}
+                                    className="hover:text-blue-600 hover:underline">{r.sector}</button>
+                                  {r.industry ? ` · ${r.industry}` : ""}
                                 </span>
-                              )}
-                              {watchlistSyms.has(r.symbol) && (
-                                <span className="text-[10px] px-1 rounded font-bold" title="In your watchlist"
-                                  style={{ backgroundColor: "#fef3c7", color: "#b45309", border: "1px solid #fcd34d" }}>WL</span>
-                              )}
-                              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{color:CAP_COLORS[r.cap_size]??"#6b7280",backgroundColor:(CAP_COLORS[r.cap_size]??"#6b7280")+"18",border:"1px solid "+(CAP_COLORS[r.cap_size]??"#6b7280")+"50"}}>{r.cap_size}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-sm text-gray-700 font-medium truncate block">{r.name}</span>
-                              <span className="text-[11px] text-gray-400">
-                                <button onClick={()=>{setSF(r.sector);setRS("");goToPage(1);}}
-                                  className="hover:text-blue-600 hover:underline">{r.sector}</button>
-                                {r.industry ? ` · ${r.industry}` : ""}
-                              </span>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <div className="font-bold text-lg tabular-nums">{r.price?.toLocaleString()}</div>
-                              <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
-                            </div>
-                            <div className="flex flex-col justify-center gap-0.5 text-xs text-gray-500 shrink-0 pl-4 border-l border-gray-100">
-                              {/* Row 1: momentum + volume */}
-                              <div className="flex items-center gap-3">
-                                <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
-                                <span style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</span>
-                                <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
-                                <span>{fmtCap(r.market_cap,active?.exchange??"NSE")}</span>
-                                {earnings[r.ticker] && <span>E: <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></span>}
                               </div>
-                              {/* Row 2: price context */}
-                              <div className="flex items-center gap-3 text-gray-400">
-                                <span>SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></span>
-                                <span>SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></span>
-                                <span>%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
-                                <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
-                                  className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
-                                  title="Open on TradingView">TV ↗</a>
+                              <div className="text-right shrink-0 ml-1">
+                                <div className="font-bold text-base sm:text-lg tabular-nums">{r.price?.toLocaleString()}</div>
+                                <div className="text-sm font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</div>
                               </div>
+                            </div>
+                            {/* Row 2: all stats flex-wrap — wraps naturally on narrow screens */}
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500">
+                              <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
+                              <span style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ MACD Bull":"▼ MACD Bear"}</span>
+                              <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
+                              <span>{fmtCap(r.market_cap,active?.exchange??"NSE")}</span>
+                              {earnings[r.ticker] && <span>E: <strong style={{color:earningsColor(earnings[r.ticker])}}>{fmtEarnings(earnings[r.ticker])}</strong></span>}
+                              <span className="text-gray-300 hidden sm:inline">·</span>
+                              <span className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></span>
+                              <span className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></span>
+                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
+                              <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
+                                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
+                                title="Open on TradingView">TV ↗</a>
                             </div>
                           </div>
                         ) : (

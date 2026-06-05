@@ -15,7 +15,8 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
 
   const [rightOffset, setRO] = useState(0);
   const [showSma50, setS50]  = useState(false);
-  const drag = useRef<{ startX: number; startRO: number } | null>(null);
+  const drag  = useRef<{ startX: number; startRO: number } | null>(null);
+  const pinch = useRef<{ dist: number; vb: number } | null>(null);
 
   const PRICE_H = priceHeight;
   const VOL_H   = 52;
@@ -49,6 +50,34 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
     setRO(Math.max(0, Math.min(total - visibleBars, drag.current.startRO - barsDelta)));
   }
   function onMouseUp() { drag.current = null; }
+
+  /* ── Touch: pan (1 finger) + pinch zoom (2 fingers) ── */
+  function onTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 1) {
+      drag.current  = { startX: e.touches[0].clientX, startRO: rightOffset };
+      pinch.current = null;
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinch.current = { dist: Math.hypot(dx, dy), vb: visibleBars };
+      drag.current  = null;
+    }
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    e.preventDefault();
+    if (e.touches.length === 1 && drag.current) {
+      const pxPerBar = (w - PAD.l - PAD.r) / visibleBars;
+      const barsDelta = Math.round((e.touches[0].clientX - drag.current.startX) / pxPerBar);
+      setRO(Math.max(0, Math.min(total - visibleBars, drag.current.startRO - barsDelta)));
+    } else if (e.touches.length === 2 && pinch.current) {
+      const dx   = e.touches[0].clientX - e.touches[1].clientX;
+      const dy   = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const ratio = pinch.current.dist / dist;          // > 1 = zoom in, < 1 = zoom out
+      setVB(Math.min(total, Math.max(10, Math.round(pinch.current.vb * ratio))));
+    }
+  }
+  function onTouchEnd() { drag.current = null; pinch.current = null; }
 
   if (!visible.length)
     return <div className="flex items-center justify-center text-gray-300 text-xs" style={{ height: TOTAL_H }}>No chart data</div>;
@@ -98,10 +127,11 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
 
   return (
     <div ref={containerRef} className="w-full select-none"
-      style={{ cursor: drag.current ? "grabbing" : "crosshair" }}
+      style={{ cursor: drag.current ? "grabbing" : "crosshair", touchAction: "none" }}
       onWheel={onWheel}
       onMouseDown={onMouseDown} onMouseMove={onMouseMove}
-      onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
+      onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
+      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <svg width={w} height={TOTAL_H} style={{ display: "block" }}>
         <line x1={PAD.l} y1={VOL_TOP - 1} x2={PAD.l + W} y2={VOL_TOP - 1} stroke="#e5e7eb" strokeWidth={0.5}/>
         {priceTicks.map((p, i) => (
