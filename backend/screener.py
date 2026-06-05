@@ -2342,10 +2342,13 @@ def _is_market_open(exchange: str) -> bool:
 
 def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     """Live OHLCV for NSE tickers.
-    Primary: nselib market_watch (real-time, single API call).
-    Fallback: yfinance period=5d interval=1d (today's partial bar, batch download).
+    Priority order:
+      1. nselib market_watch — real-time single API call (fails on Railway consistently)
+      2. 75-min intraday cache — already downloaded, zero network, today's real prices
+      3. yfinance 5-min fallback — for any tickers still missing
     """
     result: Dict[str, Dict] = {}
+    today_str = datetime.date.today().isoformat()
 
     # ── Primary: nselib ───────────────────────────────────────────────────────
     try:
@@ -2390,7 +2393,38 @@ def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     except Exception as e:
         print(f"[screener] nselib error ({type(e).__name__}: {e}) — using yfinance fallback")
 
-    # ── Gap-fill: yfinance for any tickers nselib missed ─────────────────────
+    # ── Gap-fill tier 2: 75-min intraday cache ───────────────────────────────
+    # The 75m intraday cache is already downloaded and has today's real prices.
+    # This is the most reliable source when nselib fails (as it does on Railway).
+    # Aggregate today's 75-min bars → single daily OHLCV bar.
+    missing_after_nselib = [t for t in tickers if t not in result]
+    if missing_after_nselib:
+        try:
+            intra_cache = _load_intraday_cache("NSE", 75)
+            if intra_cache:
+                filled = 0
+                for ticker in missing_after_nselib:
+                    df_75 = intra_cache.get(ticker)
+                    if df_75 is None or df_75.empty:
+                        continue
+                    # Keep only today's bars
+                    today_bars_mask = df_75.index.normalize() >= pd.Timestamp(today_str)
+                    df_today = df_75[today_bars_mask]
+                    if df_today.empty:
+                        continue
+                    result[ticker] = {
+                        "open":   float(df_today["Open"].iloc[0]),
+                        "high":   float(df_today["High"].max()),
+                        "low":    float(df_today["Low"].min()),
+                        "close":  float(df_today["Close"].iloc[-1]),
+                        "volume": int(df_today["Volume"].sum()),
+                    }
+                    filled += 1
+                print(f"[screener] NSE live (intraday cache): filled {filled}/{len(missing_after_nselib)} missing")
+        except Exception as e:
+            print(f"[screener] NSE live intraday-cache fallback error: {e}")
+
+    # ── Gap-fill tier 3: yfinance 5-min for any still-missing tickers ────────
     # Run for ALL missing tickers, not just when nselib returned zero.
     # nselib may cover 1,900/2,000 tickers but miss stocks on upper/lower circuit,
     # newly listed stocks, or those with data issues — those get no today's bar.
