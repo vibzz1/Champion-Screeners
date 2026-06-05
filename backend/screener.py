@@ -1657,6 +1657,52 @@ def _topup_ohlcv(exchange: str, data: Dict[str, pd.DataFrame], tickers: List[str
     return data
 
 
+def _inject_today_from_intraday(exchange: str, data: Dict[str, pd.DataFrame], today_str: str) -> int:
+    """Aggregate today's 75m intraday cache bars into one synthetic daily bar per ticker.
+
+    Injects the bar directly into `data` (modifies in place).
+    Returns the count of tickers that received today's bar (0 = cache not ready).
+
+    Preferred over _topup_ohlcv for NSE/BSE on Railway: yfinance period='2d' returns
+    NSE/BSE bars with UTC timestamps ("2026-06-04" instead of "2026-06-05"), so the
+    date check silently fails and today_bars is always empty.
+    """
+    try:
+        intra = _load_intraday_cache(exchange, _intraday_bar_minutes(exchange))
+        if not intra:
+            return 0
+        filled = 0
+        ts_today = pd.Timestamp(today_str)
+        for ticker, df_hist in data.items():
+            df_75 = intra.get(ticker)
+            if df_75 is None or df_75.empty:
+                continue
+            today_mask = df_75.index.normalize() >= ts_today
+            df_today = df_75[today_mask]
+            if df_today.empty:
+                continue
+            today_row = pd.DataFrame(
+                [[float(df_today["Open"].iloc[0]),
+                  float(df_today["High"].max()),
+                  float(df_today["Low"].min()),
+                  float(df_today["Close"].iloc[-1]),
+                  int(df_today["Volume"].sum())]],
+                columns=["Open", "High", "Low", "Close", "Volume"],
+                index=[ts_today],
+            )
+            # Drop any stale today row already in hist before appending
+            try:
+                mask = df_hist.index.normalize().tz_localize(None) >= ts_today
+            except TypeError:
+                mask = df_hist.index.normalize() >= ts_today
+            data[ticker] = pd.concat([df_hist[~mask], today_row])
+            filled += 1
+        return filled
+    except Exception as _e:
+        print(f"[screener] _inject_today_from_intraday({exchange}): {type(_e).__name__}: {_e}")
+        return 0
+
+
 def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame]:
     """Download 1Y OHLCV for all tickers in batches; cache to disk.
 
@@ -1670,8 +1716,9 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
 
     Cache strategy (non-NSE / Bhavcopy-empty fallback):
       - Today's cache exists  → return instantly (already has today's bars)
-      - Stale cache (≤5 days) → load it, run a fast parallel period='2d' top-up to add
-                                 today's partial bar, save as today's cache, return
+      - Stale cache (≤5 days) → load it; for NSE/BSE inject from 75m intraday cache
+                                 (reliable on Railway); for US/other use _topup_ohlcv;
+                                 save as today's cache, return
       - No cache              → full cold-start download (period='1y'), save, return
     """
     # ── NSE Bhavcopy shortcut (skips disk cache — Bhavcopy has its own in-memory cache) ──
@@ -1716,41 +1763,16 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                     for t in list(universe_data.keys())[:10]
                 )
                 if not bhav_has_today:
-                    try:
-                        intra = _load_intraday_cache(exchange, _intraday_bar_minutes(exchange))
-                        if intra:
-                            filled = 0
-                            ts_today = pd.Timestamp(today_str)
-                            for ticker, df_hist in universe_data.items():
-                                df_75 = intra.get(ticker)
-                                if df_75 is None or df_75.empty:
-                                    continue
-                                today_mask = df_75.index.normalize() >= ts_today
-                                df_today = df_75[today_mask]
-                                if df_today.empty:
-                                    continue
-                                today_row = pd.DataFrame(
-                                    [[float(df_today["Open"].iloc[0]),
-                                      float(df_today["High"].max()),
-                                      float(df_today["Low"].min()),
-                                      float(df_today["Close"].iloc[-1]),
-                                      int(df_today["Volume"].sum())]],
-                                    columns=["Open","High","Low","Close","Volume"],
-                                    index=[ts_today],
-                                )
-                                universe_data[ticker] = pd.concat([df_hist, today_row])
-                                filled += 1
-                            print(f"[screener] NSE Bhavcopy: added today's bar from "
-                                  f"intraday cache for {filled}/{len(universe_data)} tickers")
-                        else:
-                            print("[screener] NSE Bhavcopy: intraday cache not ready — "
-                                  "falling back to _topup_ohlcv")
-                            universe_data = _topup_ohlcv(exchange, universe_data,
-                                                         list(universe_data.keys()))
-                    except Exception as _e:
-                        print(f"[screener] NSE Bhavcopy today-bar inject error: {_e}")
-                        universe_data = _topup_ohlcv(exchange, universe_data,
-                                                     list(universe_data.keys()))
+                    filled = _inject_today_from_intraday(exchange, universe_data, today_str)
+                    if filled > 0:
+                        print(f"[screener] NSE Bhavcopy: added today's bar from "
+                              f"intraday cache for {filled}/{len(universe_data)} tickers")
+                    else:
+                        # 75m cache not ready yet (before ~10:30 IST when first bar completes).
+                        # _topup_ohlcv is broken for NSE on Railway (UTC timestamps → empty).
+                        # Scan uses yesterday's Bhavcopy close — correct behaviour pre-open.
+                        print("[screener] NSE Bhavcopy: intraday cache not ready — "
+                              "scan uses yesterday's close (pre-open or cache building)")
 
                 _SCREEN_PROGRESS.update({"phase": "cache", "done": len(universe_data),
                                          "total": len(universe_data), "exchange": exchange, "bar_min": 0})
@@ -1772,22 +1794,40 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                     break
 
         if not has_today:
-            # Stale cache — top-up with today's bars.
-            # Only save (and rename to today's file) if top-up actually got bars.
-            # If top-up fails (yfinance down etc.) keep the old file intact so
-            # the 5-day stale window still expires normally → cold-start triggers.
-            cached = _topup_ohlcv(exchange, cached, tickers)
-            # Re-check: did top-up succeed for at least some tickers?
-            got_today = any(
-                (df := cached.get(t)) is not None and not df.empty
-                and str(df.index[-1])[:10] == today_str
-                for t in list(cached.keys())[:20]
-            )
-            if got_today:
-                _save_ohlcv_cache(exchange, cached)
-                print(f"[screener] {exchange}: top-up succeeded — saved as today's cache")
-            else:
-                print(f"[screener] {exchange}: top-up got 0 bars — keeping old cache file intact")
+            # For NSE/BSE: try 75m intraday cache first — _topup_ohlcv is unreliable
+            # on Railway due to UTC timestamp issue (yfinance returns "2026-06-04" for
+            # Indian bars on June 5). US/other exchanges use _topup_ohlcv directly.
+            injected = 0
+            if exchange in ("NSE", "BSE"):
+                injected = _inject_today_from_intraday(exchange, cached, today_str)
+                if injected > 0:
+                    print(f"[screener] {exchange}: added today's bar from intraday cache "
+                          f"for {injected}/{len(cached)} tickers")
+                    got_today = any(
+                        (df := cached.get(t)) is not None and not df.empty
+                        and str(df.index[-1])[:10] == today_str
+                        for t in list(cached.keys())[:20]
+                    )
+                    if got_today:
+                        _save_ohlcv_cache(exchange, cached)
+                        print(f"[screener] {exchange}: intraday top-up saved as today's cache")
+                else:
+                    print(f"[screener] {exchange}: intraday cache not ready — "
+                          "scan uses yesterday's close (pre-open or cache building)")
+
+            if injected == 0 and exchange not in ("NSE", "BSE"):
+                # US/other: _topup_ohlcv works (no UTC timestamp issue for these exchanges)
+                cached = _topup_ohlcv(exchange, cached, tickers)
+                got_today = any(
+                    (df := cached.get(t)) is not None and not df.empty
+                    and str(df.index[-1])[:10] == today_str
+                    for t in list(cached.keys())[:20]
+                )
+                if got_today:
+                    _save_ohlcv_cache(exchange, cached)
+                    print(f"[screener] {exchange}: top-up succeeded — saved as today's cache")
+                else:
+                    print(f"[screener] {exchange}: top-up got 0 bars — keeping old cache file intact")
 
         print(f"[screener] {exchange}: {len(cached)} tickers from cache")
         _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached), "total": len(cached), "exchange": exchange, "bar_min": 0})
@@ -2668,6 +2708,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     #   b) Post-close before Bhavcopy update (15:30–19:00 IST): today's final close.
     # After Bhavcopy updates (~19:00 IST) the cache has today's date → injection skips.
     live_bars: Dict[str, Dict] = {}
+    cache_has_today = False   # set below; used for is_live return
     if not as_of_date:
         today_str = datetime.date.today().isoformat()
         cache_has_today = any(
@@ -2731,7 +2772,9 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     matched = [_enrich(r) for r in matched]
     matched.sort(key=lambda x: x.get("change_pct") or 0, reverse=True)
     _SCREEN_PROGRESS["phase"] = "idle"
-    return matched, bool(live_bars)
+    # is_live = True when scan used today's partial bar (either via _fetch_live_*
+    # injection OR intraday cache injection in _download_ohlcv upstream).
+    return matched, bool(live_bars) or (cache_has_today and not as_of_date)
 
 
 def prewarm_ohlcv_cache(exchanges: List[str] = None) -> None:
