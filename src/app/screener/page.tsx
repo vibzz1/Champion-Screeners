@@ -85,7 +85,7 @@ export default function ScreenerPage() {
   const [active, setActive]         = useState<SavedScreener | null>(null);
   const [results, setResults]       = useState<Result[]>([]);
   const [loading, setLoading]       = useState(false);
-  const [masterZoom, setMasterZoom] = useState(69);
+  const [masterZoom, setMasterZoom] = useState(121);
   const [error, setError]           = useState("");
   const [warning, setWarning]       = useState("");
   const [view, setView]             = useState<"overview"|"charts">("overview");
@@ -96,6 +96,7 @@ export default function ScreenerPage() {
   const [capFilter, setCF]          = useState("All");
   const [pageSize, setPageSize]     = useState(20);
   const [asOfDate, setAsOfDate]      = useState("");
+  const [dateInput, setDateInput]    = useState("");  // local display value for date text field
   const [isLive, setIsLive]          = useState(false);
   const [favorites, setFavorites]    = useState<Record<string, Result>>({});
   const [showFavorites, setShowFavorites] = useState(false);
@@ -110,7 +111,7 @@ export default function ScreenerPage() {
   const scanStartRef = useRef<number>(0);
   const [resultSearch, setRS]        = useState("");
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
-  const [chartCols, setChartCols]    = useState<1|2>(1);
+  const [chartCols, setChartCols]    = useState<1|2>(2);
   const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
   const [recentScreeners, setRecent] = useState<SavedScreener[]>([]);
   const [scanDuration, setScanDuration] = useState<number | null>(null);
@@ -253,7 +254,7 @@ export default function ScreenerPage() {
       if (screener && Array.isArray(results) && results.length > 0) {
         setActive(screener);
         setResults(results);
-        if (savedDate) setAsOfDate(savedDate);
+        if (savedDate) { setAsOfDate(savedDate); setDateInput(savedDate); }
         setLastRefreshed(new Date(timestamp));
         setRestored(true);
       }
@@ -839,10 +840,28 @@ export default function ScreenerPage() {
               </button>
             )}
             {asOfDate && <span className="hidden md:inline text-amber-600 text-[10px] font-semibold">← historical</span>}
-            <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)}
-              className="hidden md:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400" />
+            <input
+              type="text"
+              value={dateInput}
+              onChange={e => {
+                const raw = e.target.value.replace(/[^\d-]/g, "").slice(0, 10);
+                setDateInput(raw);
+                if (!raw) { setAsOfDate(""); }
+                else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) { setAsOfDate(raw); }
+              }}
+              onBlur={e => {
+                const v = e.target.value.trim();
+                if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+                  setDateInput(asOfDate); // revert to last valid on blur
+                }
+              }}
+              placeholder="YYYY-MM-DD"
+              maxLength={10}
+              className="hidden md:block border border-gray-200 rounded px-2 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400 w-28 tabular-nums"
+              style={{ borderColor: dateInput && !/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? "#fca5a5" : undefined }}
+            />
             {asOfDate && (
-              <button onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
+              <button onClick={() => { setAsOfDate(""); setDateInput(""); if (active) runScreen(active, ""); }}
                 className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap">
                 Today
               </button>
@@ -1043,9 +1062,7 @@ export default function ScreenerPage() {
                       </>;
                     })()}
                   </>
-                ) : (
-                  <span className="text-gray-400 italic">← Click a screen to run it, or create a new one</span>
-                )}
+                ) : null}
                 {/* Re-run button */}
                 {active && !loading && (
                   <button
@@ -1296,7 +1313,7 @@ export default function ScreenerPage() {
                       title="Zoom in">+</button>
                   </div>
                   <button
-                    onClick={() => setMasterZoom(69)}
+                    onClick={() => setMasterZoom(121)}
                     className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded border border-gray-200 hover:border-gray-300 transition-colors">
                     Reset
                   </button>

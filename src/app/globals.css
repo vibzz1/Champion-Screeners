@@ -74,6 +74,30 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ── Focus-visible rings (WCAG 2.1 keyboard navigation) ─────────────────── */
+/* Suppress browser default outlines — we provide our own */
+*:focus { outline: none; }
+
+/* Keyboard focus only — shown when tabbing, not on mouse click */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Dark mode: brighter ring so it's visible on dark surfaces */
+[data-theme="dark"] button:focus-visible,
+[data-theme="dark"] a:focus-visible,
+[data-theme="dark"] input:focus-visible,
+[data-theme="dark"] select:focus-visible {
+  outline-color: #60a5fa;
+}
+
 /* ── Table headers: uppercase + tracked ────────────────────────────────── */
 thead th {
   text-transform: uppercase;

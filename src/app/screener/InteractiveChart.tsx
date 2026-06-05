@@ -7,7 +7,7 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [w, setW]            = useState(800);
-  const [visibleBars, setVB] = useState(Math.min(masterBars ?? 69, data.length));
+  const [visibleBars, setVB] = useState(Math.min(masterBars ?? 121, data.length));
 
   useEffect(() => {
     if (masterBars != null) setVB(Math.min(masterBars, data.length));
