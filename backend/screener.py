@@ -1703,10 +1703,12 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                     print(f"[screener] Bhavcopy: {len(universe_data)}/{len(tickers)} universe tickers (full coverage)")
 
                 # Bhavcopy only has data through yesterday's close.
-                # Run the same period='2d' top-up used by the disk-cache path so
-                # today's partial daily bar appears in OHLCV before filtering.
-                # This is the original working mechanism — daily interval includes
-                # today's partial bar and works reliably on Railway.
+                # Add today's partial bar using the 75m intraday cache — it is
+                # already downloaded, has today's real prices, and is confirmed
+                # working on Railway. Aggregate today's 75m bars → one daily bar.
+                # _topup_ohlcv (yfinance period='2d') is unreliable: on Railway
+                # the UTC timestamp for NSE June-5 bars serialises as "2026-06-04",
+                # so the today_str date check always fails and today_bars is empty.
                 today_str = datetime.date.today().isoformat()
                 bhav_has_today = any(
                     (df := universe_data.get(t)) is not None and not df.empty
@@ -1714,7 +1716,41 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                     for t in list(universe_data.keys())[:10]
                 )
                 if not bhav_has_today:
-                    universe_data = _topup_ohlcv(exchange, universe_data, list(universe_data.keys()))
+                    try:
+                        intra = _load_intraday_cache(exchange, _intraday_bar_minutes(exchange))
+                        if intra:
+                            filled = 0
+                            ts_today = pd.Timestamp(today_str)
+                            for ticker, df_hist in universe_data.items():
+                                df_75 = intra.get(ticker)
+                                if df_75 is None or df_75.empty:
+                                    continue
+                                today_mask = df_75.index.normalize() >= ts_today
+                                df_today = df_75[today_mask]
+                                if df_today.empty:
+                                    continue
+                                today_row = pd.DataFrame(
+                                    [[float(df_today["Open"].iloc[0]),
+                                      float(df_today["High"].max()),
+                                      float(df_today["Low"].min()),
+                                      float(df_today["Close"].iloc[-1]),
+                                      int(df_today["Volume"].sum())]],
+                                    columns=["Open","High","Low","Close","Volume"],
+                                    index=[ts_today],
+                                )
+                                universe_data[ticker] = pd.concat([df_hist, today_row])
+                                filled += 1
+                            print(f"[screener] NSE Bhavcopy: added today's bar from "
+                                  f"intraday cache for {filled}/{len(universe_data)} tickers")
+                        else:
+                            print("[screener] NSE Bhavcopy: intraday cache not ready — "
+                                  "falling back to _topup_ohlcv")
+                            universe_data = _topup_ohlcv(exchange, universe_data,
+                                                         list(universe_data.keys()))
+                    except Exception as _e:
+                        print(f"[screener] NSE Bhavcopy today-bar inject error: {_e}")
+                        universe_data = _topup_ohlcv(exchange, universe_data,
+                                                     list(universe_data.keys()))
 
                 _SCREEN_PROGRESS.update({"phase": "cache", "done": len(universe_data),
                                          "total": len(universe_data), "exchange": exchange, "bar_min": 0})
