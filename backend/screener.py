@@ -1701,6 +1701,21 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
                         print(f"[screener] yfinance gap-fill failed: {_e}")
                 else:
                     print(f"[screener] Bhavcopy: {len(universe_data)}/{len(tickers)} universe tickers (full coverage)")
+
+                # Bhavcopy only has data through yesterday's close.
+                # Run the same period='2d' top-up used by the disk-cache path so
+                # today's partial daily bar appears in OHLCV before filtering.
+                # This is the original working mechanism — daily interval includes
+                # today's partial bar and works reliably on Railway.
+                today_str = datetime.date.today().isoformat()
+                bhav_has_today = any(
+                    (df := universe_data.get(t)) is not None and not df.empty
+                    and str(df.index[-1])[:10] == today_str
+                    for t in list(universe_data.keys())[:10]
+                )
+                if not bhav_has_today:
+                    universe_data = _topup_ohlcv(exchange, universe_data, list(universe_data.keys()))
+
                 _SCREEN_PROGRESS.update({"phase": "cache", "done": len(universe_data),
                                          "total": len(universe_data), "exchange": exchange, "bar_min": 0})
                 return universe_data
