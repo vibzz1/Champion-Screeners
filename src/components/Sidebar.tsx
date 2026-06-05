@@ -178,12 +178,6 @@ export default function Sidebar() {
       {/* ── Full content (hidden when collapsed) ────────────────────────── */}
       {!collapsed && (
         <>
-          {/* Section label */}
-          <div className="px-3 py-2 text-[10px] font-bold tracking-widest uppercase"
-            style={{ color: TEXT_DIM, borderBottom: `1px solid ${BORDER}` }}>
-            Analytics Tools
-          </div>
-
           {/* Stock Screener toggle */}
           <button
             onClick={() => { if (!onScreener) { window.location.href = "/screener"; return; } setOpen(v => !v); }}
@@ -231,7 +225,7 @@ export default function Sidebar() {
                           style={{ color: isActive ? ACTIVE_C : TEXT_LT }}>
                           <span className="truncate">{s.name}</span>
                           {scanCounts[s.id] != null && (
-                            <span className="shrink-0 text-[9px] px-1 rounded font-bold tabular-nums"
+                            <span className="shrink-0 text-[11px] px-1 rounded font-bold tabular-nums"
                               style={{
                                 backgroundColor: isActive ? "rgba(96,165,250,0.25)" : "rgba(255,255,255,0.1)",
                                 color: isActive ? ACTIVE_C : TEXT_DIM,
@@ -241,7 +235,7 @@ export default function Sidebar() {
                           )}
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <span className="text-[9px] font-semibold px-1 rounded"
+                          <span className="text-[11px] font-semibold px-1 rounded"
                             style={{
                               backgroundColor: isActive ? "rgba(96,165,250,0.2)" : "rgba(255,255,255,0.08)",
                               color:           isActive ? ACTIVE_C : TEXT_DIM,
@@ -249,8 +243,8 @@ export default function Sidebar() {
                             {s.exchange}
                           </span>
                           {s.interval && s.interval !== "1d" && (
-                            <span className="text-[9px] font-semibold px-1 rounded"
-                              style={{ backgroundColor: "rgba(168,85,247,0.15)", color: "#c084fc" }}>
+                            <span className="text-[11px] font-semibold px-1 rounded"
+                              style={{ backgroundColor: "rgba(96,165,250,0.15)", color: ACTIVE_C }}>
                               {s.interval}
                             </span>
                           )}
@@ -258,17 +252,27 @@ export default function Sidebar() {
                       </button>
                       <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1 shrink-0 gap-0.5">
                         <button onClick={() => emit("mio:edit", { screener: s })}
-                          className="p-0.5 text-[11px] transition-colors"
+                          className="p-1 rounded transition-colors"
                           style={{ color: TEXT_DIM }}
-                          onMouseEnter={e => { e.currentTarget.style.color = ACTIVE_C; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; }}
-                          title="Edit">✎</button>
+                          onMouseEnter={e => { e.currentTarget.style.color = ACTIVE_C; e.currentTarget.style.backgroundColor = "rgba(96,165,250,0.1)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; e.currentTarget.style.backgroundColor = "transparent"; }}
+                          title="Edit">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
                         <button onClick={() => emit("mio:delete", { id: s.id })}
-                          className="p-0.5 text-[11px] transition-colors"
+                          className="p-1 rounded transition-colors"
                           style={{ color: TEXT_DIM }}
-                          onMouseEnter={e => { e.currentTarget.style.color = "#f87171"; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; }}
-                          title="Delete">✕</button>
+                          onMouseEnter={e => { e.currentTarget.style.color = "#f87171"; e.currentTarget.style.backgroundColor = "rgba(248,113,113,0.1)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.color = TEXT_DIM; e.currentTarget.style.backgroundColor = "transparent"; }}
+                          title="Delete">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   );

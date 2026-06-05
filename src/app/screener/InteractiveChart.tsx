@@ -140,7 +140,7 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
       </svg>
 
       <div className="flex items-center gap-3 px-3 pb-1 text-[10px] text-gray-400">
-        <span>scroll=zoom · drag=pan</span>
+        <span title="Scroll to zoom · Drag to pan" className="cursor-help select-none opacity-40 hover:opacity-80 transition-opacity text-[11px]">ⓘ</span>
         <div className="flex items-center border border-gray-200 rounded overflow-hidden">
           <button onClick={() => setVB(v => Math.min(total, Math.max(10, v + Math.max(1, Math.round(v * 0.1)))))}
             className="px-2 py-0.5 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none border-r border-gray-200" title="Zoom out">−</button>
