@@ -25,9 +25,11 @@ export default function PortfolioPage() {
   async function load() {
     try {
       const r = await fetch(`${API}/api/portfolio`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setPositions(await r.json());
-    } catch {
-      setError("Cannot connect to backend.");
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Cannot connect to backend.");
     }
   }
 
@@ -67,31 +69,44 @@ export default function PortfolioPage() {
     load();
   }
 
-  const totalCost = positions.reduce((s, p) => s + p.buy_price * p.quantity, 0);
+  const totalCost  = positions.reduce((s, p) => s + p.buy_price * p.quantity, 0);
   const totalValue = positions.reduce((s, p) => s + p.current_price * p.quantity, 0);
-  const totalPnL = totalValue - totalCost;
+  const totalPnL   = totalValue - totalCost;
   const totalPnLPct = totalCost > 0 ? (totalPnL / totalCost) * 100 : 0;
 
   return (
-    <div>
-      <h2 className="text-lg font-bold mb-3" style={{ color: "#003366" }}>Portfolio Tracker</h2>
-      {error && <p className="text-red-600 text-xs mb-2">{error}</p>}
+    <div className="mob-page-pad md:p-0 max-w-5xl">
+      <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Portfolio Tracker</h2>
 
-      {/* Summary */}
-      <div className="flex gap-3 mb-4 text-xs">
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-start gap-3 mb-4 px-4 py-3 rounded-lg border text-xs"
+          style={{ backgroundColor: "var(--mio-dn-bg)", borderColor: "var(--mio-dn)", color: "var(--mio-dn)" }}>
+          <span className="text-base leading-none mt-0.5">🔌</span>
+          <div className="flex-1">
+            <div className="font-semibold mb-0.5">Backend offline</div>
+            <div style={{ color: "var(--mio-text2)" }}>{error}</div>
+          </div>
+          <button onClick={load} className="shrink-0 px-2.5 py-1 rounded border text-[10px] font-semibold transition-colors"
+            style={{ borderColor: "var(--mio-dn)", color: "var(--mio-dn)" }}>↺ Retry</button>
+        </div>
+      )}
+
+      {/* Summary strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 text-xs">
         {[
-          { label: "Positions", value: positions.length.toString() },
-          { label: "Total Cost", value: `$${totalCost.toLocaleString("en-US", { maximumFractionDigits: 2 })}` },
-          { label: "Market Value", value: `$${totalValue.toLocaleString("en-US", { maximumFractionDigits: 2 })}` },
+          { label: "Positions",    value: positions.length.toString() },
+          { label: "Total Cost",   value: `₹${totalCost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+          { label: "Market Value", value: `₹${totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
           {
             label: "Total P&L",
-            value: `${totalPnL >= 0 ? "+" : ""}$${totalPnL.toFixed(2)} (${totalPnLPct >= 0 ? "+" : ""}${totalPnLPct.toFixed(2)}%)`,
-            color: totalPnL >= 0 ? "#007700" : "#cc0000",
+            value: `${totalPnL >= 0 ? "+" : ""}₹${Math.abs(totalPnL).toFixed(0)} (${totalPnLPct >= 0 ? "+" : ""}${totalPnLPct.toFixed(2)}%)`,
+            color: totalPnL >= 0 ? "var(--mio-up)" : "var(--mio-dn)",
           },
         ].map((c) => (
-          <div key={c.label} className="border border-gray-300 rounded p-2 bg-white min-w-[130px]">
-            <div className="text-gray-500 text-[10px]">{c.label}</div>
-            <div className="font-bold text-sm mt-0.5" style={{ color: c.color || "#003366" }}>{c.value}</div>
+          <div key={c.label} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+            <div className="text-gray-400 text-[10px] mb-0.5">{c.label}</div>
+            <div className="font-bold text-sm tabular-nums" style={{ color: c.color || "var(--mio-accent)" }}>{c.value}</div>
           </div>
         ))}
       </div>
@@ -100,30 +115,29 @@ export default function PortfolioPage() {
       <div className="mb-3">
         <button
           onClick={() => setShowForm(!showForm)}
-          className="px-3 py-1.5 text-xs text-white rounded"
-          style={{ backgroundColor: "#003366" }}
-        >
+          className="px-3 py-1.5 text-xs text-white rounded font-semibold transition-opacity hover:opacity-90"
+          style={{ backgroundColor: "var(--mio-accent)" }}>
           {showForm ? "Cancel" : "+ Add Position"}
         </button>
       </div>
 
       {/* Add form */}
       {showForm && (
-        <div className="border border-gray-300 rounded p-3 mb-4 bg-[#f8fbff] text-xs">
-          <div className="grid grid-cols-3 gap-2">
+        <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-[#f8fbff] text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
-              { label: "Symbol *", key: "symbol", placeholder: "AAPL" },
-              { label: "Name", key: "name", placeholder: "Apple Inc." },
-              { label: "Quantity *", key: "quantity", placeholder: "10", type: "number" },
-              { label: "Buy Price *", key: "buy_price", placeholder: "150.00", type: "number" },
-              { label: "Current Price", key: "current_price", placeholder: "same as buy price" },
-              { label: "Buy Date *", key: "buy_date", placeholder: "2024-01-15", type: "date" },
+              { label: "Symbol *",      key: "symbol",        placeholder: "RELIANCE",    type: "text"   },
+              { label: "Name",          key: "name",          placeholder: "Reliance Ind.", type: "text"  },
+              { label: "Quantity *",    key: "quantity",      placeholder: "10",           type: "number" },
+              { label: "Buy Price *",   key: "buy_price",     placeholder: "2400.00",      type: "number" },
+              { label: "Current Price", key: "current_price", placeholder: "same as buy",  type: "number" },
+              { label: "Buy Date *",    key: "buy_date",      placeholder: "2024-01-15",   type: "date"   },
             ].map((f) => (
               <div key={f.key}>
-                <label className="block font-semibold mb-1">{f.label}</label>
+                <label className="block font-semibold mb-1 text-gray-600">{f.label}</label>
                 <input
-                  type={f.type || "text"}
-                  className="border border-gray-300 rounded px-2 py-1 w-full"
+                  type={f.type}
+                  className="border border-gray-200 rounded px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400"
                   placeholder={f.placeholder}
                   value={form[f.key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
@@ -133,78 +147,80 @@ export default function PortfolioPage() {
           </div>
           <button
             onClick={addPosition}
-            className="mt-3 px-4 py-1.5 text-xs text-white rounded"
-            style={{ backgroundColor: "#003366" }}
-          >
+            className="mt-3 px-4 py-1.5 text-xs text-white rounded font-semibold transition-opacity hover:opacity-90"
+            style={{ backgroundColor: "var(--mio-accent)" }}>
             Add to Portfolio
           </button>
         </div>
       )}
 
       {/* Table */}
-      {positions.length === 0 ? (
-        <div className="text-xs text-gray-500 border border-gray-200 rounded p-4">
-          No positions yet. Add one above.
+      {positions.length === 0 && !error ? (
+        <div className="flex flex-col items-center justify-center py-16 text-gray-400 border border-gray-200 rounded-lg bg-white">
+          <div className="text-4xl mb-3 opacity-40">💼</div>
+          <div className="text-sm font-medium">No positions yet</div>
+          <div className="text-xs mt-1 text-gray-300">Click "+ Add Position" above to get started</div>
         </div>
-      ) : (
-        <div className="border border-gray-300 rounded overflow-x-auto bg-white">
+      ) : positions.length > 0 ? (
+        <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white shadow-sm">
           <table className="w-full text-xs border-collapse">
             <thead>
-              <tr className="bg-gray-100 text-left">
-                {["Symbol", "Name", "Qty", "Buy Price", "Current Price", "Cost Basis", "Market Value", "P&L", "P&L %", "Buy Date", ""].map((h) => (
-                  <th key={h} className="border border-gray-200 px-2 py-1 whitespace-nowrap">{h}</th>
+              <tr className="bg-gray-50 text-left border-b border-gray-200">
+                {["Symbol", "Name", "Qty", "Buy", "Current", "Cost", "Value", "P&L", "P&L %", "Date", ""].map((h) => (
+                  <th key={h} className="px-2 py-1.5 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {positions.map((p) => {
-                const cost = p.buy_price * p.quantity;
+                const cost  = p.buy_price * p.quantity;
                 const value = p.current_price * p.quantity;
-                const pnl = value - cost;
+                const pnl   = value - cost;
                 const pnlPct = (pnl / cost) * 100;
                 const green = pnl >= 0;
 
                 return (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="border border-gray-200 px-2 py-1 font-semibold" style={{ color: "#003399" }}>{p.symbol}</td>
-                    <td className="border border-gray-200 px-2 py-1 text-gray-600">{p.name}</td>
-                    <td className="border border-gray-200 px-2 py-1">{p.quantity}</td>
-                    <td className="border border-gray-200 px-2 py-1">${p.buy_price.toFixed(2)}</td>
-                    <td className="border border-gray-200 px-2 py-1">
+                  <tr key={p.id} className="hover:bg-slate-50 border-b border-gray-100 last:border-0 transition-colors">
+                    <td className="px-2 py-1.5 font-bold" style={{ color: "var(--mio-ticker)" }}>{p.symbol}</td>
+                    <td className="px-2 py-1.5 text-gray-500 truncate max-w-[120px]">{p.name}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{p.quantity}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{p.buy_price.toLocaleString()}</td>
+                    <td className="px-2 py-1.5 tabular-nums">
                       {editingPrice?.id === p.id ? (
                         <div className="flex gap-1">
                           <input
                             type="number"
-                            className="border rounded px-1 py-0.5 w-20 text-xs"
+                            className="border rounded px-1 py-0.5 w-20 text-xs focus:outline-none focus:border-blue-400"
                             value={editingPrice.value}
                             onChange={(e) => setEditingPrice({ id: p.id, value: e.target.value })}
                             onKeyDown={(e) => e.key === "Enter" && updatePrice(p.id, editingPrice.value)}
                             autoFocus
                           />
-                          <button onClick={() => updatePrice(p.id, editingPrice.value)} className="text-green-700 font-bold">✓</button>
+                          <button onClick={() => updatePrice(p.id, editingPrice.value)}
+                            className="font-bold" style={{ color: "var(--mio-up)" }}>✓</button>
                           <button onClick={() => setEditingPrice(null)} className="text-gray-400">✕</button>
                         </div>
                       ) : (
-                        <span
-                          className="cursor-pointer hover:underline"
-                          title="Click to edit"
-                          onClick={() => setEditingPrice({ id: p.id, value: p.current_price.toString() })}
-                        >
-                          ${p.current_price.toFixed(2)}
+                        <span className="cursor-pointer hover:underline" title="Click to edit"
+                          onClick={() => setEditingPrice({ id: p.id, value: p.current_price.toString() })}>
+                          {p.current_price.toLocaleString()}
                         </span>
                       )}
                     </td>
-                    <td className="border border-gray-200 px-2 py-1">${cost.toFixed(2)}</td>
-                    <td className="border border-gray-200 px-2 py-1">${value.toFixed(2)}</td>
-                    <td className="border border-gray-200 px-2 py-1" style={{ color: green ? "#007700" : "#cc0000" }}>
-                      {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+                    <td className="px-2 py-1.5 tabular-nums text-gray-600">{cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="px-2 py-1.5 tabular-nums text-gray-600">{value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="px-2 py-1.5 tabular-nums font-semibold"
+                      style={{ color: green ? "var(--mio-up)" : "var(--mio-dn)" }}>
+                      {pnl >= 0 ? "+" : ""}{pnl.toFixed(0)}
                     </td>
-                    <td className="border border-gray-200 px-2 py-1" style={{ color: green ? "#007700" : "#cc0000" }}>
+                    <td className="px-2 py-1.5 tabular-nums font-semibold"
+                      style={{ color: green ? "var(--mio-up)" : "var(--mio-dn)" }}>
                       {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
                     </td>
-                    <td className="border border-gray-200 px-2 py-1 text-gray-500">{p.buy_date}</td>
-                    <td className="border border-gray-200 px-2 py-1">
-                      <button onClick={() => remove(p.id)} className="text-red-400 hover:text-red-600">×</button>
+                    <td className="px-2 py-1.5 text-gray-400">{p.buy_date}</td>
+                    <td className="px-1 py-1.5 text-center">
+                      <button onClick={() => remove(p.id)}
+                        className="text-gray-300 hover:text-red-500 transition-colors text-base leading-none">×</button>
                     </td>
                   </tr>
                 );
@@ -212,7 +228,7 @@ export default function PortfolioPage() {
             </tbody>
           </table>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1264,6 +1264,30 @@ export default function ScreenerPage() {
               </div>
             )}
 
+            {/* Backend offline / scan error */}
+            {!loading && active && error && results.length === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 py-20 select-none">
+                <div className="text-5xl mb-4 opacity-50">🔌</div>
+                <div className="text-sm font-semibold mb-1" style={{ color: "var(--mio-dn)" }}>Backend offline</div>
+                <div className="text-xs text-gray-400 max-w-xs text-center leading-relaxed mt-1 px-4">
+                  {error.replace(/\(.*\)$/, "").trim()}
+                </div>
+                <div className="flex items-center gap-2 mt-5">
+                  <button
+                    onClick={() => runScreen(active, asOfDate)}
+                    className="px-4 py-1.5 rounded border text-xs font-semibold transition-colors"
+                    style={{ borderColor: "var(--mio-dn)", color: "var(--mio-dn)", backgroundColor: "var(--mio-dn-bg)" }}>
+                    ↺ Retry
+                  </button>
+                  <button
+                    onClick={() => setError("")}
+                    className="px-3 py-1.5 rounded border border-gray-200 text-xs text-gray-400 hover:bg-gray-50 transition-colors">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ── Overview table (dynamic columns) ───────────────────────── */}
             {!loading && results.length>0 && view==="overview" && (
               <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col" onClick={() => showColMenu && setShowColMenu(false)}>

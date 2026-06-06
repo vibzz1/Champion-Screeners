@@ -20,10 +20,12 @@ export default function WatchlistsPage() {
   async function loadLists() {
     try {
       const r = await fetch(`${API}/api/watchlists`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setLists(data);
+      setError("");
       if (data.length && !selected) setSelected(data[0]);
-    } catch { setError("Cannot connect to backend."); }
+    } catch (e) { setError(e instanceof Error ? e.message : "Cannot connect to backend."); }
   }
 
   const fetchQuotes = useCallback(async (syms: string[]) => {
@@ -88,11 +90,24 @@ export default function WatchlistsPage() {
   return (
     <div className="mob-page-pad md:p-0">
       <h2 className="text-lg font-bold mb-3" style={{ color: "var(--mio-accent)" }}>Watch Lists</h2>
-      {error && <p className="text-red-600 text-xs mb-2">{error}</p>}
 
-      <div className="flex gap-4">
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-start gap-3 mb-4 px-4 py-3 rounded-lg border text-xs"
+          style={{ backgroundColor: "var(--mio-dn-bg)", borderColor: "var(--mio-dn)", color: "var(--mio-dn)" }}>
+          <span className="text-base leading-none mt-0.5">🔌</span>
+          <div className="flex-1">
+            <div className="font-semibold mb-0.5">Backend offline</div>
+            <div style={{ color: "var(--mio-text2)" }}>{error}</div>
+          </div>
+          <button onClick={loadLists} className="shrink-0 px-2.5 py-1 rounded border text-[10px] font-semibold"
+            style={{ borderColor: "var(--mio-dn)", color: "var(--mio-dn)" }}>↺ Retry</button>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-4">
         {/* ── Left: list panel ─────────────────────────────────────────── */}
-        <div className="w-52 shrink-0">
+        <div className="w-full sm:w-52 shrink-0">
           <div className="border border-gray-200 rounded-lg overflow-hidden mb-2 shadow-sm">
             <div className="text-[11px] font-bold text-white px-3 py-1.5" style={{ backgroundColor: "var(--mio-accent)" }}>
               My Watch Lists

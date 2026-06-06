@@ -123,14 +123,14 @@ tbody tr:nth-child(even) {
 .col-resize-active * { cursor: col-resize !important; user-select: none !important; }
 
 /* ════════════════════════════════════════════════════════════════════════════
-   MOBILE  (< 768 px)
+   TABLET + MOBILE  (< 1024 px)
    Strategy:
-   • Sidebar: fixed off-screen, slides in as an overlay when toggled
-   • Table: horizontal scroll; hide low-priority columns; pin Symbol col
+   • Sidebar: fixed off-screen overlay on all non-desktop viewports
    • Main fills 100% width since sidebar is no longer in flow
+   • Pages (backtester / watchlist / portfolio) get inner padding
    ════════════════════════════════════════════════════════════════════════════ */
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
 
   /* ── Sidebar overlay ───────────────────────────────────────────────────── */
   aside {
@@ -149,6 +149,19 @@ tbody tr:nth-child(even) {
 
   /* ── Main fills viewport ───────────────────────────────────────────────── */
   main { width: 100vw !important; padding: 0 !important; }
+
+  /* ── Backtester / watchlist / portfolio pages: restore inner padding ────── */
+  .mob-page-pad { padding: 1rem !important; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MOBILE ONLY  (< 768 px)
+   Strategy:
+   • Table: horizontal scroll; hide low-priority columns; pin Symbol col
+   • Toolbar items marked .mob-hide are suppressed
+   ════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 767px) {
 
   /* ── Table: hide low-priority columns ─────────────────────────────────── */
   [data-col="fav"],
@@ -175,11 +188,8 @@ tbody tr:nth-child(even) {
     box-shadow: 2px 0 10px rgba(0,0,0,0.45) !important;
   }
 
-  /* ── Action bar / toolbar: wrap gracefully ─────────────────────────────── */
+  /* ── Action bar / toolbar: suppress extra controls ─────────────────────── */
   .mob-hide { display: none !important; }
-
-  /* ── Backtester / watchlist pages: restore padding ─────────────────────── */
-  .mob-page-pad { padding: 1rem !important; }
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
