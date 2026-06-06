@@ -239,7 +239,7 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
         </div>
         <button onClick={() => setS50(v => !v)}
           className="ml-auto px-2 py-0.5 rounded border text-[10px]"
-          style={{ borderColor: showSma50 ? "#3b82f6" : "#e5e7eb", color: showSma50 ? "#3b82f6" : "#aaa", backgroundColor: showSma50 ? "#eff6ff" : "white" }}>
+          style={{ borderColor: showSma50 ? "#2f68c5" : "#e5e7eb", color: showSma50 ? "#2f68c5" : "#aaa", backgroundColor: showSma50 ? "#eff6ff" : "white" }}>
           SMA50
         </button>
         <span className="inline-flex items-center gap-1">

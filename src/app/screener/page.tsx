@@ -75,7 +75,7 @@ function emit(type: string, detail: object = {}) {
 }
 
 const CAP_COLORS: Record<string, string> = {
-  Mega: "#7c3aed", Large: "#1d4ed8", Mid: "#0f766e", Small: "#92400e",
+  Mega: "#7c3aed", Large: "#173ead", Mid: "#0f766e", Small: "#92400e",
 };
 
 // ── Main page ──────────────────────────────────────────────────────────────
@@ -1116,9 +1116,9 @@ export default function ScreenerPage() {
                           onClick={() => setShowColMenu(v => !v)}
                           className="px-2.5 py-1 rounded border text-[11px] flex items-center gap-1 transition-colors"
                           style={{
-                            borderColor:     showColMenu ? "#3b82f6" : "#d1d5db",
+                            borderColor:     showColMenu ? "#2f68c5" : "#d1d5db",
                             backgroundColor: showColMenu ? "#eff6ff" : "white",
-                            color:           showColMenu ? "#2563eb" : "#374151",
+                            color:           showColMenu ? "#1e4fbc" : "#374151",
                           }}>
                           ⊞ Columns
                           {hiddenCols.size > 0 && (
@@ -1165,7 +1165,7 @@ export default function ScreenerPage() {
                       {(["overview","charts"] as const).map(v=>(
                         <button key={v} onClick={()=>setView(v)}
                           className="px-2 sm:px-3 py-1 text-[11px] font-semibold transition-colors"
-                          style={{backgroundColor:view===v?"#e8f0fe":"white",color:view===v?"#1d4ed8":"#6b7280",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                          style={{backgroundColor:view===v?"#e8f0fe":"white",color:view===v?"#173ead":"#6b7280",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
                           <span className="hidden sm:inline">{v==="overview"?"Table":"Charts"}</span>
                           <span className="sm:hidden">{v==="overview"?"Tbl":"Cht"}</span>
                         </button>
@@ -1293,7 +1293,7 @@ export default function ScreenerPage() {
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
                       return (
                         <tr key={r.ticker}
-                          className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#3b82f6]"} border-b border-gray-100 transition-all`}>
+                          className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} ${volSurge?"hover:shadow-[inset_3px_0_0_#f97316]":"hover:shadow-[inset_3px_0_0_#2f68c5]"} border-b border-gray-100 transition-all`}>
                           {visibleCols.map(colId => {
                             const cell = renderCell(colId, r, idx);
                             return cell ? cloneElement(cell as React.ReactElement<{'data-col'?:string}>, { 'data-col': colId }) : null;
@@ -1337,7 +1337,7 @@ export default function ScreenerPage() {
                       {(["sm","md","lg"] as const).map((s,i)=>(
                         <button key={s} onClick={()=>setChartSize(s)}
                           className="px-2.5 py-1 text-[10px] font-semibold transition-colors"
-                          style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#1d4ed8":"#9ca3af",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                          style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#173ead":"#9ca3af",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
                           {s.toUpperCase()}
                         </button>
                       ))}
@@ -1345,11 +1345,11 @@ export default function ScreenerPage() {
                     <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
                       <button onClick={()=>setChartCols(1)}
                         className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                        style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#1d4ed8":"#9ca3af",borderRight:"1px solid #e5e7eb"}}
+                        style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#173ead":"#9ca3af",borderRight:"1px solid #e5e7eb"}}
                         title="Single column">▬</button>
                       <button onClick={()=>setChartCols(2)}
                         className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                        style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#1d4ed8":"#9ca3af"}}
+                        style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#173ead":"#9ca3af"}}
                         title="Two columns">⊞</button>
                     </div>
                   </div>
