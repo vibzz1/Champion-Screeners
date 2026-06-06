@@ -35,7 +35,6 @@ const TEXT_MED = "#94a3b8";
 const TEXT_LT  = "#e2e8f0";
 const ACTIVE_C = "#60a5fa";
 const ACTIVE_B = "rgba(96,165,250,0.12)";
-const AMBER    = "#f59e0b";
 
 const WIDTH_KEY     = "mio_sidebar_width";
 const DEFAULT_WIDTH = 192;
@@ -183,7 +182,7 @@ export default function Sidebar() {
             onClick={() => { if (!onScreener) { window.location.href = "/screener"; return; } setOpen(v => !v); }}
             className="w-full flex items-center justify-between px-3 py-2 text-left text-[12px] transition-colors"
             style={{
-              color:           onScreener ? AMBER : TEXT_MED,
+              color:           onScreener ? ACTIVE_C : TEXT_MED,
               fontWeight:      onScreener ? 600 : 400,
               borderBottom:    `1px solid ${BORDER}`,
               backgroundColor: "transparent",
@@ -288,7 +287,7 @@ export default function Sidebar() {
               <Link key={item.href} href={item.href}
                 className="block px-3 py-2 text-[12px] transition-colors"
                 style={{
-                  color:        active ? AMBER : TEXT_MED,
+                  color:        active ? ACTIVE_C : TEXT_MED,
                   fontWeight:   active ? 600 : 400,
                   borderBottom: `1px solid ${BORDER}`,
                 }}

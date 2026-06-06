@@ -734,12 +734,15 @@ export default function ScreenerPage() {
             </span>
           </td>
         );
-      case "sma20":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma20 != null && r.price > r.sma20 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma20 ?? "—"}</td>;
-      case "sma50":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma50 != null && r.price > r.sma50 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma50 ?? "—"}</td>;
-      case "sma200":
-        return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: r.sma200 != null && r.price > r.sma200 ? "var(--mio-up)" : "var(--mio-dn)" }}>{r.sma200 ?? "—"}</td>;
+      case "sma20": { const sv20 = r.sma20; const abv20 = sv20 != null && r.price > sv20;
+        return <td key={colId} className="px-2 py-1 tabular-nums text-[11px]" style={{ ...tdBase, color: sv20 != null ? (abv20 ? "var(--mio-up)" : "var(--mio-dn)") : "var(--mio-text3)", opacity: 0.8 }}>
+          {sv20 != null ? (sv20 >= 1000 ? `${(sv20/1000).toFixed(1)}K` : sv20.toFixed(0)) : "—"}</td>; }
+      case "sma50": { const sv50 = r.sma50; const abv50 = sv50 != null && r.price > sv50;
+        return <td key={colId} className="px-2 py-1 tabular-nums text-[11px]" style={{ ...tdBase, color: sv50 != null ? (abv50 ? "var(--mio-up)" : "var(--mio-dn)") : "var(--mio-text3)", opacity: 0.8 }}>
+          {sv50 != null ? (sv50 >= 1000 ? `${(sv50/1000).toFixed(1)}K` : sv50.toFixed(0)) : "—"}</td>; }
+      case "sma200": { const sv200 = r.sma200; const abv200 = sv200 != null && r.price > sv200;
+        return <td key={colId} className="px-2 py-1 tabular-nums text-[11px]" style={{ ...tdBase, color: sv200 != null ? (abv200 ? "var(--mio-up)" : "var(--mio-dn)") : "var(--mio-text3)", opacity: 0.8 }}>
+          {sv200 != null ? (sv200 >= 1000 ? `${(sv200/1000).toFixed(1)}K` : sv200.toFixed(0)) : "—"}</td>; }
       case "h52":
         return <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: (r.pct_from_52w_high ?? -99) >= -5 ? "var(--mio-up)" : "var(--mio-text2)" }}>{r.pct_from_52w_high != null ? `${r.pct_from_52w_high}%` : "—"}</td>;
       case "days":
@@ -758,8 +761,13 @@ export default function ScreenerPage() {
               : <span className="text-gray-300 text-[10px]">1d</span>}
           </td>
         );
-      case "chart":
-        return <td key={colId} className="px-0 py-0" style={tdBase}>{r.sparkline.length > 0 && <Sparkline data={r.sparkline} positive={up} />}</td>;
+      case "chart": {
+        // ⑦ Use sparkline's own trend (last vs first) rather than daily change%
+        const sparkPos = r.sparkline.length >= 2
+          ? r.sparkline[r.sparkline.length - 1] >= r.sparkline[0]
+          : up;
+        return <td key={colId} className="px-0 py-0" style={tdBase}>{r.sparkline.length > 0 && <Sparkline data={r.sparkline} positive={sparkPos} />}</td>;
+      }
       default:
         return <td key={colId} />;
     }
@@ -799,7 +807,7 @@ export default function ScreenerPage() {
       <div className="flex-1 flex flex-col overflow-hidden">
 
         {/* ── Action bar ──────────────────────────────────────────────────── */}
-        <div className="px-2 md:px-3 py-1.5 border-b border-gray-200 bg-slate-50 flex items-center flex-wrap gap-1.5 md:gap-2 text-xs shrink-0 shadow-sm">
+        <div className="px-2 md:px-3 py-2 border-b border-gray-200 flex items-center flex-wrap gap-1.5 md:gap-2 text-xs shrink-0" style={{ backgroundColor: "#f1f5f9", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
           <button onClick={()=>setEditing("new")}
             className="px-3 py-1 rounded font-semibold text-white text-[11px] flex items-center gap-1 shadow-sm"
             style={{backgroundColor:"var(--mio-accent)"}}>
@@ -1075,25 +1083,33 @@ export default function ScreenerPage() {
                     ↺ Re-run
                   </button>
                 )}
-                {/* Restored-from-cache banner */}
+                {/* Restored-from-cache banner — informational (gray), not a warning */}
                 {restored && !loading && results.length > 0 && (
-                  <span className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+                  <span className="text-[10px] px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400">
                     Restored · re-run to refresh
                   </span>
                 )}
                 {error && <span className="text-red-500">{error}</span>}
                 {warning && <span className="text-amber-600 text-[10px] max-w-lg leading-tight">{warning}</span>}
 
-                {/* View toggle + chart controls — always right-aligned, mobile-safe */}
+                {/* Right controls — always right-aligned */}
                 {!loading && results.length>0 && (
                   <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                    {/* Sector + Cap filters — desktop only (sector chips below handle mobile) */}
-                    <select className="hidden sm:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={sectorFilter} onChange={e=>{setSF(e.target.value);setRS("");}}>
-                      {sectors.map(s=><option key={s}>{s}</option>)}
-                    </select>
+                    {/* Cap filter — desktop only */}
                     <select className="hidden sm:block border border-gray-200 rounded px-1.5 py-0.5 text-[11px] bg-white" value={capFilter} onChange={e=>setCF(e.target.value)}>
                       {["All","Mega","Large","Mid","Small"].map(c=><option key={c}>{c}</option>)}
                     </select>
+
+                    {/* Search — inline on desktop (④ search moved here) */}
+                    <div className="hidden sm:flex relative">
+                      <svg className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                      </svg>
+                      <input value={resultSearch} onChange={e=>setRS(e.target.value)}
+                        placeholder="Search…"
+                        className="border border-gray-200 rounded pl-6 pr-2 py-0.5 text-[11px] bg-white focus:outline-none focus:border-blue-400 focus:w-40 transition-all"
+                        style={{ width: resultSearch ? 160 : 120 }}/>
+                    </div>
 
                     {/* Columns button — desktop only */}
                     {view === "overview" && (
@@ -1147,13 +1163,13 @@ export default function ScreenerPage() {
                     )}
 
                     {/* View toggle — always visible */}
-                    <div className="flex border border-gray-200 rounded overflow-hidden">
+                    <div className="flex border border-gray-200 rounded overflow-hidden bg-white">
                       {(["overview","charts"] as const).map(v=>(
                         <button key={v} onClick={()=>setView(v)}
-                          className="px-2 sm:px-3 py-1 text-[11px] font-medium transition-colors"
-                          style={{backgroundColor:view===v?"var(--mio-accent)":"white",color:view===v?"white":"#374151",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
-                          <span className="hidden sm:inline">{v==="overview"?"📋 Table":"📈 Charts"}</span>
-                          <span className="sm:hidden">{v==="overview"?"Table":"Charts"}</span>
+                          className="px-2 sm:px-3 py-1 text-[11px] font-semibold transition-colors"
+                          style={{backgroundColor:view===v?"#e8f0fe":"white",color:view===v?"#1d4ed8":"#6b7280",borderRight:v==="overview"?"1px solid #e5e7eb":undefined}}>
+                          <span className="hidden sm:inline">{v==="overview"?"Table":"Charts"}</span>
+                          <span className="sm:hidden">{v==="overview"?"Tbl":"Cht"}</span>
                         </button>
                       ))}
                     </div>
@@ -1164,7 +1180,7 @@ export default function ScreenerPage() {
                           {(["sm","md","lg"] as const).map((s,i)=>(
                             <button key={s} onClick={()=>setChartSize(s)}
                               className="px-2 py-1 text-[10px] font-medium transition-colors"
-                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"var(--mio-accent)":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#1d4ed8":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
                               {s.toUpperCase()}
                             </button>
                           ))}
@@ -1172,11 +1188,11 @@ export default function ScreenerPage() {
                         <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
                           <button onClick={()=>setChartCols(1)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"var(--mio-accent)":"#888",borderRight:"1px solid #e5e7eb"}}
+                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#1d4ed8":"#888",borderRight:"1px solid #e5e7eb"}}
                             title="1 column">▬</button>
                           <button onClick={()=>setChartCols(2)}
                             className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"var(--mio-accent)":"#888"}}
+                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#1d4ed8":"#888"}}
                             title="2 columns">⊞</button>
                         </div>
                       </>
@@ -1185,35 +1201,35 @@ export default function ScreenerPage() {
                 )}
               </div>
 
-              {/* Search row — full-width on mobile, hidden on desktop (desktop has it in the right group above) */}
+              {/* Search row — mobile only (desktop search is now inline above) */}
               {!loading && results.length>0 && (
                 <div className="sm:hidden px-3 pb-1.5 flex items-center gap-2">
                   <div className="relative flex-1">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
+                    <svg className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 pointer-events-none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
                     <input value={resultSearch} onChange={e=>setRS(e.target.value)}
                       placeholder="Search symbol / name…"
                       className="border border-gray-200 rounded pl-6 pr-2 py-1.5 text-[11px] bg-white w-full focus:outline-none focus:border-blue-400"/>
                   </div>
                 </div>
               )}
-              {/* Search row desktop — keep in the right toolbar group (sm:block version) */}
-              {!loading && results.length>0 && (
-                <div className="hidden sm:flex px-3 pb-1.5 items-center gap-2">
-                  <div className="relative">
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300 text-[11px]">🔍</span>
-                    <input value={resultSearch} onChange={e=>setRS(e.target.value)}
-                      placeholder="Search symbol / name…"
-                      className="border border-gray-200 rounded pl-6 pr-2 py-0.5 text-[11px] bg-white w-44 focus:outline-none focus:border-blue-400"/>
-                  </div>
-                </div>
-              )}
 
-              {/* Row 2: sector chips */}
+              {/* Row 2: sector chips — with visible "All" chip (⑤ active state always visible) */}
               {!loading && sectorCounts.length>0 && (
                 <div className="px-3 pb-1.5 flex items-center gap-2">
-                  <span className="text-[10px] text-gray-400 shrink-0">Sectors:</span>
                   <div className="relative flex-1 min-w-0">
                     <div className="flex gap-1.5 items-center overflow-x-auto" style={{scrollbarWidth:"none",msOverflowStyle:"none"}}>
+                      {/* "All" chip — always visible, active when no filter */}
+                      <button onClick={()=>{setSF("All");setRS("");goToPage(1);}}
+                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
+                        style={{
+                          backgroundColor: sectorFilter==="All"?"var(--mio-accent)":"#f1f5f9",
+                          color:           sectorFilter==="All"?"white":"#475569",
+                          borderColor:     sectorFilter==="All"?"var(--mio-accent)":"#e2e8f0",
+                        }}>
+                        All
+                      </button>
                       {sectorCounts.map(([sec,cnt])=>(
                         <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
                           className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
@@ -1225,9 +1241,6 @@ export default function ScreenerPage() {
                           {sec} <span className="opacity-70">{cnt}</span>
                         </button>
                       ))}
-                      {sectorFilter!=="All" && (
-                        <button onClick={()=>{setSF("All");goToPage(1);}} className="shrink-0 px-2 py-0.5 rounded-full text-[10px] border border-gray-300 text-gray-500 hover:bg-gray-100">✕ Clear</button>
-                      )}
                     </div>
                     <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"/>
                   </div>
