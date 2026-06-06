@@ -252,10 +252,17 @@ export default function ScreenerPage() {
       const { screener, results, asOfDate: savedDate, timestamp } = JSON.parse(raw);
       if (screener && Array.isArray(results) && results.length > 0) {
         setActive(screener);
-        setResults(results);
         if (savedDate) { setAsOfDate(savedDate); }
         setLastRefreshed(new Date(timestamp));
-        setRestored(true);
+        // If every result has ohlcv:[] it means localStorage quota was exceeded and
+        // OHLCV was stripped on save. Re-run the scan to get fresh chart data.
+        const ohlcvStripped = results.every((r: { ohlcv?: unknown[] }) => (r.ohlcv?.length ?? 0) === 0);
+        if (ohlcvStripped) {
+          runScreen(screener, savedDate ?? "");
+        } else {
+          setResults(results);
+          setRestored(true);
+        }
       }
     } catch {}
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
