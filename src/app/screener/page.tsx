@@ -96,7 +96,6 @@ export default function ScreenerPage() {
   const [capFilter, setCF]          = useState("All");
   const [pageSize, setPageSize]     = useState(20);
   const [asOfDate, setAsOfDate]      = useState("");
-  const [dateInput, setDateInput]    = useState("");  // local display value for date text field
   const [isLive, setIsLive]          = useState(false);
   const [favorites, setFavorites]    = useState<Record<string, Result>>({});
   const [showFavorites, setShowFavorites] = useState(false);
@@ -254,7 +253,7 @@ export default function ScreenerPage() {
       if (screener && Array.isArray(results) && results.length > 0) {
         setActive(screener);
         setResults(results);
-        if (savedDate) { setAsOfDate(savedDate); setDateInput(savedDate); }
+        if (savedDate) { setAsOfDate(savedDate); }
         setLastRefreshed(new Date(timestamp));
         setRestored(true);
       }
@@ -847,33 +846,32 @@ export default function ScreenerPage() {
                 ↓ CSV
               </button>
             )}
-            {asOfDate && <span className="hidden md:inline text-amber-600 text-[10px] font-semibold">← historical</span>}
-            <input
-              type="text"
-              value={dateInput}
-              onChange={e => {
-                const raw = e.target.value.replace(/[^\d-]/g, "").slice(0, 10);
-                setDateInput(raw);
-                if (!raw) { setAsOfDate(""); }
-                else if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) { setAsOfDate(raw); }
-              }}
-              onBlur={e => {
-                const v = e.target.value.trim();
-                if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-                  setDateInput(asOfDate); // revert to last valid on blur
-                }
-              }}
-              placeholder="YYYY-MM-DD"
-              maxLength={10}
-              className="hidden md:block border border-gray-200 rounded px-2 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400 w-28 tabular-nums"
-              style={{ borderColor: dateInput && !/^\d{4}-\d{2}-\d{2}$/.test(dateInput) ? "#fca5a5" : undefined }}
-            />
-            {asOfDate && (
-              <button onClick={() => { setAsOfDate(""); setDateInput(""); if (active) runScreen(active, ""); }}
-                className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap">
-                Today
-              </button>
-            )}
+            {/* Date picker — calendar popup, auto-runs on selection */}
+            <div className="hidden md:flex items-center gap-1">
+              {asOfDate && (
+                <span className="text-amber-600 text-[10px] font-semibold whitespace-nowrap">HIST</span>
+              )}
+              <input
+                type="date"
+                value={asOfDate}
+                max={(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })()}
+                min="2000-01-01"
+                onChange={e => {
+                  const val = e.target.value; // always "" or valid YYYY-MM-DD
+                  setAsOfDate(val);
+                  if (active) runScreen(active, val);
+                }}
+                className="border rounded px-2 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400 tabular-nums cursor-pointer"
+                style={{ borderColor: asOfDate ? "#fbbf24" : "#e5e7eb", color: asOfDate ? "#92400e" : undefined, width: 130 }}
+                title="Pick a historical date — scan will re-run automatically"
+              />
+              {asOfDate && (
+                <button onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
+                  className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap transition-colors">
+                  Today
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1030,12 +1028,12 @@ export default function ScreenerPage() {
         {!showEditor && !showFavorites && (
           <>
             {/* ── Toolbar ─────────────────────────────────────────────── */}
-            <div className="border-b border-gray-200 bg-slate-50 text-xs">
+            <div className="border-b border-gray-200 bg-white text-xs">
               {/* Row 1: scan info + view tabs */}
-              <div className="px-3 py-1.5 flex items-center gap-2 flex-wrap">
+              <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
                 {active ? (
                   <>
-                    <span className="font-bold" style={{color:"var(--mio-accent)"}}>{active.name}</span>
+                    <span className="font-bold" style={{color:"var(--mio-accent)",fontSize:15,letterSpacing:"-0.01em"}}>{active.name}</span>
                     <span className="text-gray-300">·</span>
                     <span className="text-gray-500">{active.exchange}</span>
                     {active.interval && active.interval !== "1d" && (
@@ -1173,30 +1171,7 @@ export default function ScreenerPage() {
                         </button>
                       ))}
                     </div>
-                    {/* Chart size + column controls — desktop only */}
-                    {view==="charts" && (
-                      <>
-                        <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
-                          {(["sm","md","lg"] as const).map((s,i)=>(
-                            <button key={s} onClick={()=>setChartSize(s)}
-                              className="px-2 py-1 text-[10px] font-medium transition-colors"
-                              style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#1d4ed8":"#888",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
-                              {s.toUpperCase()}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
-                          <button onClick={()=>setChartCols(1)}
-                            className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#1d4ed8":"#888",borderRight:"1px solid #e5e7eb"}}
-                            title="1 column">▬</button>
-                          <button onClick={()=>setChartCols(2)}
-                            className="px-2.5 py-1 text-[10px] font-medium transition-colors"
-                            style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#1d4ed8":"#888"}}
-                            title="2 columns">⊞</button>
-                        </div>
-                      </>
-                    )}
+                    {/* Chart size + col controls live in the zoom bar when view=charts */}
                   </div>
                 )}
               </div>
@@ -1335,25 +1310,49 @@ export default function ScreenerPage() {
             {/* ── Charts view ─────────────────────────────────────────────── */}
             {!loading && results.length>0 && view==="charts" && (
               <div ref={resultsRef} className="flex-1 overflow-auto flex flex-col">
-                {/* Master zoom bar */}
-                <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50 sticky top-0 z-10">
-                  <span className="text-xs text-gray-500 font-medium">Zoom all charts</span>
-                  <div className="flex items-center border border-gray-300 rounded overflow-hidden">
+                {/* Chart controls bar: zoom + size + columns */}
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-white sticky top-0 z-10">
+                  {/* Zoom */}
+                  <span className="text-[11px] text-gray-400 font-medium hidden sm:inline select-none">Bars</span>
+                  <div className="flex items-center border border-gray-200 rounded overflow-hidden">
                     <button
                       onClick={() => setMasterZoom(v => Math.min(300, v + Math.max(1, Math.round(v * 0.15))))}
-                      className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-r border-gray-300 transition-colors"
-                      title="Zoom out">−</button>
-                    <span className="px-2 text-xs text-gray-500 tabular-nums min-w-[40px] text-center">{masterZoom}b</span>
+                      className="px-2.5 py-1 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none border-r border-gray-200 transition-colors"
+                      title="Show fewer bars">−</button>
+                    <span className="px-2 text-[11px] text-gray-500 tabular-nums min-w-[34px] text-center">{masterZoom}</span>
                     <button
                       onClick={() => setMasterZoom(v => Math.max(10, v - Math.max(1, Math.round(v * 0.15))))}
-                      className="px-3 py-1 hover:bg-gray-200 text-gray-600 font-bold text-base leading-none border-l border-gray-300 transition-colors"
-                      title="Zoom in">+</button>
+                      className="px-2.5 py-1 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none border-l border-gray-200 transition-colors"
+                      title="Show more bars">+</button>
                   </div>
                   <button
                     onClick={() => setMasterZoom(121)}
-                    className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded border border-gray-200 hover:border-gray-300 transition-colors">
+                    className="text-[11px] text-gray-400 hover:text-gray-600 px-2 py-1 rounded border border-gray-200 hover:border-gray-300 transition-colors">
                     Reset
                   </button>
+
+                  {/* Right: chart size + layout */}
+                  <div className="ml-auto flex items-center gap-2">
+                    <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
+                      {(["sm","md","lg"] as const).map((s,i)=>(
+                        <button key={s} onClick={()=>setChartSize(s)}
+                          className="px-2.5 py-1 text-[10px] font-semibold transition-colors"
+                          style={{backgroundColor:chartSize===s?"#e8f0fe":"white",color:chartSize===s?"#1d4ed8":"#9ca3af",borderRight:i<2?"1px solid #e5e7eb":undefined}}>
+                          {s.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="hidden sm:flex border border-gray-200 rounded overflow-hidden">
+                      <button onClick={()=>setChartCols(1)}
+                        className="px-2.5 py-1 text-[10px] font-medium transition-colors"
+                        style={{backgroundColor:chartCols===1?"#e8f0fe":"white",color:chartCols===1?"#1d4ed8":"#9ca3af",borderRight:"1px solid #e5e7eb"}}
+                        title="Single column">▬</button>
+                      <button onClick={()=>setChartCols(2)}
+                        className="px-2.5 py-1 text-[10px] font-medium transition-colors"
+                        style={{backgroundColor:chartCols===2?"#e8f0fe":"white",color:chartCols===2?"#1d4ed8":"#9ca3af"}}
+                        title="Two columns">⊞</button>
+                    </div>
+                  </div>
                 </div>
                 <div className={`p-3 grid gap-3 ${chartCols===2?"grid-cols-2":"grid-cols-1"}`}>
                   {paged.map(r=>{
@@ -1363,7 +1362,7 @@ export default function ScreenerPage() {
                     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                     const dayCount = daysInScanMap[r.ticker];
                     return (
-                      <div key={r.ticker} id={`chart-${r.ticker}`} className="border rounded bg-white shadow-sm hover:shadow-md transition-shadow overflow-hidden" style={{borderColor: jumpToTicker===r.ticker ? "var(--mio-accent)" : "#e5e7eb", outline: jumpToTicker===r.ticker ? "2px solid #93c5fd" : "none", outlineOffset: "1px"}}>
+                      <div key={r.ticker} id={`chart-${r.ticker}`} className="rounded bg-white overflow-hidden transition-shadow" style={{boxShadow: jumpToTicker===r.ticker ? "0 0 0 2px var(--mio-accent), 0 2px 12px rgba(37,99,235,0.15)" : "0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)"}}>
                         {chartCols===1 ? (
                           /* Mobile-first: stack identity row + stats row vertically */
                           <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
