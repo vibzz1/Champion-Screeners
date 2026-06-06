@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 /* ── IST market-hours helper ── */
 function getISTInfo() {
   const now = new Date();
-  // IST = UTC + 5:30  (getTimezoneOffset converts local→UTC, +330 converts UTC→IST)
-  const ist = new Date(now.getTime() + (now.getTimezoneOffset() + 330) * 60_000);
+  // now.getTime() is always UTC epoch ms — just add 5h30m to get IST
+  const ist = new Date(now.getTime() + 330 * 60_000);
   const h = ist.getUTCHours(), m = ist.getUTCMinutes(), d = ist.getUTCDay();
   const hh = h.toString().padStart(2, "0");
   const mm = m.toString().padStart(2, "0");
