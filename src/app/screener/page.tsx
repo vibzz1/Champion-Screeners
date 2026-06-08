@@ -1045,7 +1045,7 @@ export default function ScreenerPage() {
                     <span className="text-gray-500">{active.exchange}</span>
                     {active.interval && active.interval !== "1d" && (
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-600">
-                        {active.interval === "75min" ? "75m" : active.interval === "78min" ? "78m" : active.interval}
+                        {active.interval === "15min" ? "15m" : active.interval === "75min" ? "75m" : active.interval === "78min" ? "78m" : active.interval}
                       </span>
                     )}
                     {asOfDate && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">HIST {asOfDate}</span>}

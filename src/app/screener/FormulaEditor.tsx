@@ -57,8 +57,24 @@ export function FormulaEditor({
             <select
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
               value={form.exchange}
-              onChange={e => setForm(f => ({ ...f, exchange: e.target.value }))}>
+              onChange={e => setForm(f => ({ ...f, exchange: e.target.value, interval: "1d" }))}>
               {EXCHANGES.map(ex => <option key={ex}>{ex}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Timeframe</label>
+            <select
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+              value={form.interval ?? "1d"}
+              onChange={e => setForm(f => ({ ...f, interval: e.target.value }))}>
+              <option value="1d">Daily (1D)</option>
+              {(form.exchange === "NSE" || form.exchange === "BSE") && <>
+                <option value="15min">Intraday 15m</option>
+                <option value="75min">Intraday 75m</option>
+              </>}
+              {(form.exchange !== "NSE" && form.exchange !== "BSE") && (
+                <option value="78min">Intraday 78m</option>
+              )}
             </select>
           </div>
         </div>

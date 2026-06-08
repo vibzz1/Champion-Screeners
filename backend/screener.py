@@ -1900,7 +1900,7 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
     return data
 
 # ── Indicator Computation ──────────────────────────────────────────────────
-def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, intraday: bool = False, include_ohlcv: bool = True) -> Optional[Dict[str, Any]]:
+def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, intraday: bool = False, include_ohlcv: bool = True, bar_min: int = 75) -> Optional[Dict[str, Any]]:
     """Returns OHLCV-based indicators. Info (name/sector/cap) added later.
 
     Expects a clean DataFrame from _normalize_df (flat columns, NaN rows
@@ -2103,7 +2103,8 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
 
         # ── OHLCV — last N bars with per-bar SMA20/50 for interactive chart ──
         if include_ohlcv:
-            chart_bars = 300 if intraday else 252  # 60d×5bars for 75min, 1y for daily
+            # 75-min: 5 bars/day × 60 days = 300; 15-min: 25 bars/day × 30 days = 750
+            chart_bars = (750 if bar_min <= 15 else 300) if intraday else 252
             date_fmt   = "%Y-%m-%d %H:%M" if intraday else "%Y-%m-%d"
             sma20_rolling = close.rolling(20).mean()
             sma50_rolling = close.rolling(50).mean()
@@ -2720,10 +2721,12 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     if not tickers:
         return [], False
 
-    # ── Intraday path (75min for NSE/BSE, 78min for US) ──────────────────
-    if interval in ("75min", "78min", "intraday"):
+    # ── Intraday path (15min / 75min for NSE/BSE, 78min for US) ─────────
+    if interval in ("15min", "75min", "78min", "intraday"):
         # Derive bar size: respect explicit interval, fall back to exchange default
-        if interval == "75min":
+        if interval == "15min":
+            bar_min = 15
+        elif interval == "75min":
             bar_min = 75
         elif interval == "78min":
             bar_min = 78
@@ -2738,7 +2741,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
                 _SCREEN_PROGRESS["done"] = i + 1
                 continue
             # Skip OHLCV during filter pass
-            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=False)
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=False, bar_min=bar_min)
             _SCREEN_PROGRESS["done"] = i + 1
             if ind and apply_filters(ind, filters):
                 matched_tickers_intra.append(ticker)
@@ -2748,7 +2751,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             df = ohlcv_data.get(ticker)
             if df is None:
                 continue
-            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=True)
+            ind = compute_indicators(ticker, df, as_of_date=as_of_date, intraday=True, include_ohlcv=True, bar_min=bar_min)
             if ind:
                 matched.append(ind)
         matched = [_enrich(r) for r in matched]
