@@ -2431,6 +2431,64 @@ def _is_market_open(exchange: str) -> bool:
     return now.weekday() < 5 and open_ <= now.time() <= close_
 
 
+def _fetch_fresh_5min_bars(tickers: List[str]) -> Dict[str, Dict]:
+    """Fetch today's OHLCV for a small list of tickers via yfinance 5-min bars.
+
+    Used to refresh the chart's last candle for matched tickers only — giving
+    the current partial-day O/H/L/C rather than whatever is in the 75-min cache
+    (which can be 75–150 min stale).  Designed for small lists (< 200 tickers).
+    """
+    if not tickers:
+        return {}
+    today_str = datetime.date.today().isoformat()
+    result: Dict[str, Dict] = {}
+    try:
+        raw = yf.download(
+            tickers, period="1d", interval="5m",
+            auto_adjust=True, progress=False,
+            group_by="ticker", threads=True,
+        )
+        if raw is None or raw.empty:
+            return result
+        for ticker in tickers:
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                    lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                            if raw.columns.nlevels > 1 else [])
+                    if ticker in lvl0:
+                        df_t = raw[ticker].copy()
+                    elif ticker in lvl1:
+                        df_t = raw.xs(ticker, axis=1, level=1).copy()
+                    else:
+                        continue
+                    if isinstance(df_t.columns, pd.MultiIndex):
+                        df_t.columns = df_t.columns.get_level_values(-1)
+                else:
+                    df_t = raw.copy()
+
+                df_t = df_t[[c for c in ["Open", "High", "Low", "Close", "Volume"]
+                              if c in df_t.columns]].dropna(subset=["Close"])
+                if df_t.empty or "Close" not in df_t.columns:
+                    continue
+                if str(df_t.index[-1])[:10] != today_str:
+                    continue  # no today bars yet (pre-market / holiday)
+                result[ticker] = {
+                    "open":   float(df_t["Open"].iloc[0]),
+                    "high":   float(df_t["High"].max()),
+                    "low":    float(df_t["Low"].min()),
+                    "close":  float(df_t["Close"].iloc[-1]),
+                    "volume": int(df_t["Volume"].sum()) if "Volume" in df_t.columns else 0,
+                }
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[screener] _fetch_fresh_5min_bars error: {type(e).__name__}: {e}")
+    if result:
+        print(f"[screener] _fetch_fresh_5min_bars: {len(result)}/{len(tickers)} refreshed")
+    return result
+
+
 def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     """Live OHLCV for NSE tickers.
     Priority order:
@@ -2752,6 +2810,18 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     for result in _EXECUTOR.map(_process, tickers):
         if result is not None:
             matched_tickers.append(result)
+
+    # Refresh today's bar for matched tickers with fresh yfinance 5-min data.
+    # The 75-min intraday cache (used in _inject_today_from_intraday) can be
+    # 75–150 min stale, making the chart's last candle show an old close price.
+    # Since matched_tickers is small (~20-100 vs 2109 total), this is fast (~3-5s).
+    if not as_of_date and matched_tickers and exchange in ("NSE", "BSE") and _is_market_open(exchange):
+        try:
+            fresh = _fetch_fresh_5min_bars(matched_tickers)
+            if fresh:
+                live_bars.update(fresh)   # fresh 5m close overrides stale 75m close
+        except Exception as _fe:
+            print(f"[screener] matched fresh-bar refresh error: {_fe}")
 
     # Build full OHLCV only for matched tickers (typically ~20-100 vs 2109)
     matched = []
