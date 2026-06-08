@@ -1393,18 +1393,19 @@ def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) ->
                     )
                     if latest_ts is not None:
                         elapsed_min = (now_local - latest_ts.tz_localize(tz_name)).total_seconds() / 60
-                        # Fire top-up only when the NEXT bar has completed.
-                        # elapsed is measured from the START of the last cached bar.
-                        # The next bar starts at elapsed=bar_min and COMPLETES at
-                        # elapsed=bar_min*2.  Firing at bar_min would top-up too early —
-                        # the new bar is still forming and _resample_intraday would drop it.
-                        if elapsed_min >= bar_min * 2:
+                        # Fire a background top-up whenever the cache is >15 min old.
+                        # This ensures a newly-completed bar appears in the cache within
+                        # ~15 min of finishing rather than waiting up to bar_min*2 minutes.
+                        # _resample_intraday still drops any still-forming partial bar,
+                        # so top-ups that arrive mid-bar are harmless (same complete bars).
+                        TOPUP_INTERVAL_MIN = 15
+                        if elapsed_min >= TOPUP_INTERVAL_MIN:
                             print(f"[screener] {exchange} {bar_min}min: latest bar is "
-                                  f"{elapsed_min:.0f}m ago (≥{bar_min*2}m) — bg top-up for next bar")
+                                  f"{elapsed_min:.0f}m ago (≥{TOPUP_INTERVAL_MIN}m) — bg top-up")
                             _spawn_bg_topup("stale-today")
                         else:
                             print(f"[screener] {exchange} {bar_min}min: cache current "
-                                  f"({elapsed_min:.0f}m since last bar, next fires at {bar_min*2}m)")
+                                  f"({elapsed_min:.0f}m since last bar, next fires at {TOPUP_INTERVAL_MIN}m)")
                 except Exception:
                     pass  # tz edge-case — serve stale cache, no top-up
             _SCREEN_PROGRESS.update({"phase": "cache", "done": len(cached),
