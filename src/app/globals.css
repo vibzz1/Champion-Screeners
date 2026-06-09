@@ -283,3 +283,20 @@ tbody tr:nth-child(even) {
 }
 [data-theme="dark"] main input::placeholder  { color: var(--mio-text3) !important; }
 [data-theme="dark"] main input[type="date"]  { color-scheme: dark; }
+
+/* ── Date-picker: hide native indicator so our SVG icon is the only one ─── */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+}
+/* Keep placeholder text subtle */
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  color: #94a3b8;
+}
+input[type="date"]:not([value=""])::-webkit-datetime-edit-fields-wrapper {
+  color: inherit;
+}
+
+/* ── Chart cards: dark mode border override ──────────────────────────────── */
+[data-theme="dark"] main .rounded-xl.bg-white.border {
+  border-color: var(--mio-border) !important;
+}

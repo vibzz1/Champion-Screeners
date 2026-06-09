@@ -855,23 +855,26 @@ export default function ScreenerPage() {
             )}
             {/* Date picker — calendar popup, auto-runs on selection */}
             <div className="hidden md:flex items-center gap-1">
-              {asOfDate && (
-                <span className="text-amber-600 text-[10px] font-semibold whitespace-nowrap">HIST</span>
-              )}
-              <input
-                type="date"
-                value={asOfDate}
-                max={(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })()}
-                min="2000-01-01"
-                onChange={e => {
-                  const val = e.target.value; // always "" or valid YYYY-MM-DD
-                  setAsOfDate(val);
-                  if (active) runScreen(active, val);
-                }}
-                className="border rounded px-2 py-0.5 text-[11px] bg-white text-gray-700 focus:outline-none focus:border-blue-400 tabular-nums cursor-pointer"
-                style={{ borderColor: asOfDate ? "#fbbf24" : "#e5e7eb", color: asOfDate ? "#92400e" : undefined, width: 130 }}
-                title="Pick a historical date — scan will re-run automatically"
-              />
+              <div className="relative flex items-center">
+                {/* Calendar icon */}
+                <svg className="absolute left-2 pointer-events-none" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={asOfDate ? "#92400e" : "#94a3b8"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <input
+                  type="date"
+                  value={asOfDate}
+                  max={(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; })()}
+                  min="2000-01-01"
+                  onChange={e => {
+                    const val = e.target.value; // always "" or valid YYYY-MM-DD
+                    setAsOfDate(val);
+                    if (active) runScreen(active, val);
+                  }}
+                  className="border rounded pl-7 pr-2 py-0.5 text-[11px] bg-white focus:outline-none focus:border-blue-400 tabular-nums cursor-pointer transition-colors"
+                  style={{ borderColor: asOfDate ? "#fbbf24" : "#e5e7eb", color: asOfDate ? "#92400e" : "#94a3b8", width: 136 }}
+                  title="Pick a historical date — scan will re-run automatically"
+                />
+              </div>
               {asOfDate && (
                 <button onClick={() => { setAsOfDate(""); if (active) runScreen(active, ""); }}
                   className="px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-600 hover:bg-blue-100 text-[10px] font-semibold whitespace-nowrap transition-colors">
@@ -993,7 +996,7 @@ export default function ScreenerPage() {
                   const up=(r.change_pct??0)>=0;
                   const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
                   return (
-                    <div key={r.ticker} className="border border-gray-200 rounded bg-white shadow-sm overflow-hidden w-full">
+                    <div key={r.ticker} className="border border-gray-200 rounded-xl bg-white overflow-hidden w-full" style={{boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                       <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
                         <div className="flex items-start gap-2 mb-1.5">
                           <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
@@ -1040,17 +1043,18 @@ export default function ScreenerPage() {
               <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
                 {active ? (
                   <>
-                    <span className="font-bold" style={{color:"var(--mio-accent)",fontSize:15,letterSpacing:"-0.01em"}}>{active.name}</span>
-                    <span className="text-gray-300">·</span>
-                    <span className="text-gray-500">{active.exchange}</span>
+                    {/* Scan name — primary */}
+                    <span className="font-bold tracking-tight" style={{color:"var(--mio-accent)",fontSize:15}}>{active.name}</span>
+                    {/* Exchange — subtle badge */}
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-500 leading-none">{active.exchange}</span>
                     {active.interval && active.interval !== "1d" && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-600">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-600 leading-none">
                         {active.interval === "15min" ? "15m" : active.interval === "75min" ? "75m" : active.interval === "78min" ? "78m" : active.interval}
                       </span>
                     )}
-                    {asOfDate && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">HIST {asOfDate}</span>}
+                    {asOfDate && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700 leading-none">HIST {asOfDate}</span>}
                     {isLive && !asOfDate && (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 text-green-700 border border-green-300 leading-none">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"/>LIVE
                       </span>
                     )}
@@ -1059,19 +1063,21 @@ export default function ScreenerPage() {
                       const stale  = minAgo !== null && minAgo >= 30;
                       void tick;
                       return <>
-                        <span className="text-gray-300">·</span>
-                        <span className="font-semibold" style={{color:"var(--mio-accent)"}}>{displayResults.length} match{displayResults.length!==1?"es":""}{displayResults.length!==results.length?` (${results.length} total)`:""}</span>
-                        {scanDuration != null && <>
-                          <span className="text-gray-300">·</span>
-                          <span className="text-gray-400">{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
-                        </>}
-                        {lastRefreshed && <>
-                          <span className="text-gray-300">·</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stale?"bg-amber-100 text-amber-700":"bg-gray-100 text-gray-500"}`}
+                        {/* Divider */}
+                        <span className="h-3.5 w-px bg-gray-200 mx-0.5 shrink-0"/>
+                        {/* Match count */}
+                        <span className="font-semibold tabular-nums" style={{color:"var(--mio-accent)"}}>{displayResults.length}<span className="font-normal text-gray-400 ml-0.5">{displayResults.length!==1?" matches":" match"}{displayResults.length!==results.length?` / ${results.length}`:""}</span></span>
+                        {/* Timing — lighter */}
+                        {scanDuration != null && (
+                          <span className="text-[10px] text-gray-400 tabular-nums">{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
+                        )}
+                        {/* Data timestamp */}
+                        {lastRefreshed && (
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stale?"bg-amber-100 text-amber-700":"text-gray-400"}`}
                             title={stale?"Data may be stale — re-run to refresh":undefined}>
-                            {stale?"⚠ ":""}Data as of {lastRefreshed.toTimeString().slice(0,5)}{minAgo&&minAgo>0?` · ${minAgo}m ago`:""}
+                            {stale?"⚠ as of ":"as of "}{lastRefreshed.toTimeString().slice(0,5)}{minAgo&&minAgo>0?` · ${minAgo}m ago`:""}
                           </span>
-                        </>}
+                        )}
                       </>;
                     })()}
                   </>
@@ -1081,10 +1087,10 @@ export default function ScreenerPage() {
                   <button
                     onClick={() => runScreen(active, asOfDate)}
                     title="Re-run this scan (R)"
-                    className="px-2.5 py-1 rounded border text-[11px] flex items-center gap-1 transition-colors"
-                    style={{ borderColor: "#d1d5db", color: "#374151", backgroundColor: "white" }}
-                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#eff6ff"; e.currentTarget.style.borderColor = "#93c5fd"; }}
-                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = "white"; e.currentTarget.style.borderColor = "#d1d5db"; }}>
+                    className="px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-all"
+                    style={{ borderColor: "var(--mio-accent)", border: "1px solid", color: "var(--mio-accent)", backgroundColor: "transparent" }}
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#eff6ff"; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; }}>
                     ↺ Re-run
                   </button>
                 )}
@@ -1252,17 +1258,32 @@ export default function ScreenerPage() {
 
             {/* Empty */}
             {!loading && !active && (
-              <div className="flex flex-col items-center justify-center flex-1 text-gray-400">
-                <div className="text-5xl mb-3">📊</div>
-                <div className="text-sm font-medium">Click a screen to run it</div>
-                <div className="text-xs mt-1 text-gray-300">or click "+ New Setup Scan" to create one</div>
+              <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400">
+                <div style={{ opacity: 0.22 }}>
+                  <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="6" y="38" width="14" height="18" rx="2.5" fill="currentColor"/>
+                    <rect x="25" y="26" width="14" height="30" rx="2.5" fill="currentColor"/>
+                    <rect x="44" y="12" width="14" height="44" rx="2.5" fill="currentColor"/>
+                    <polyline points="13,38 32,20 51,10" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 3" opacity="0.5"/>
+                  </svg>
+                </div>
+                <div className="text-sm font-semibold text-gray-500">Select a screen to run</div>
+                <div className="text-xs text-gray-400 -mt-1">Pick one from the sidebar, or create a new scan above</div>
               </div>
             )}
 
             {/* Backend offline / scan error */}
             {!loading && active && error && results.length === 0 && (
               <div className="flex flex-col items-center justify-center flex-1 py-20 select-none">
-                <div className="text-5xl mb-4 opacity-50">🔌</div>
+                <div className="mb-4" style={{ opacity: 0.3 }}>
+                  <svg width="56" height="56" viewBox="0 0 56 56" fill="none" color="var(--mio-dn)">
+                    <rect x="14" y="20" width="28" height="20" rx="4" stroke="currentColor" strokeWidth="2.5"/>
+                    <line x1="28" y1="40" x2="28" y2="50" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+                    <line x1="18" y1="20" x2="18" y2="12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+                    <line x1="38" y1="20" x2="38" y2="12" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+                    <line x1="8" y1="6" x2="48" y2="50" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.6"/>
+                  </svg>
+                </div>
                 <div className="text-sm font-semibold mb-1" style={{ color: "var(--mio-dn)" }}>Backend offline</div>
                 <div className="text-xs text-gray-400 max-w-xs text-center leading-relaxed mt-1 px-4">
                   {error.replace(/\(.*\)$/, "").trim()}
@@ -1369,7 +1390,7 @@ export default function ScreenerPage() {
                     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                     const dayCount = daysInScanMap[r.ticker];
                     return (
-                      <div key={r.ticker} id={`chart-${r.ticker}`} className="rounded bg-white overflow-hidden transition-shadow" style={{boxShadow: jumpToTicker===r.ticker ? "0 0 0 2px var(--mio-accent), 0 2px 12px rgba(37,99,235,0.15)" : "0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04)"}}>
+                      <div key={r.ticker} id={`chart-${r.ticker}`} className="rounded-xl bg-white overflow-hidden border transition-all" style={{borderColor: jumpToTicker===r.ticker ? "var(--mio-accent)" : "#e2e8f0", boxShadow: jumpToTicker===r.ticker ? "0 0 0 2px var(--mio-accent), 0 4px 16px rgba(37,99,235,0.15)" : "0 1px 4px rgba(0,0,0,0.05)"}}>
                         {chartCols===1 ? (
                           /* Mobile-first: stack identity row + stats row vertically */
                           <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
@@ -1480,7 +1501,14 @@ export default function ScreenerPage() {
 
             {!loading && active && results.length===0 && !error && (
               <div className="flex flex-col items-center justify-center flex-1 py-20 select-none">
-                <div className="text-5xl mb-4 opacity-40">🔍</div>
+                <div className="mb-4" style={{ opacity: 0.28 }}>
+                  <svg width="56" height="56" viewBox="0 0 56 56" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <circle cx="24" cy="24" r="17"/>
+                    <line x1="36.5" y1="36.5" x2="49" y2="49"/>
+                    <line x1="17" y1="24" x2="31" y2="24" opacity="0.45"/>
+                    <line x1="24" y1="17" x2="24" y2="31" opacity="0.45"/>
+                  </svg>
+                </div>
                 <div className="text-sm font-semibold text-gray-500 mb-1">No matches found</div>
                 <div className="text-xs text-gray-400 mb-1">
                   <span className="font-medium" style={{color:"var(--mio-accent)"}}>{active.name}</span>

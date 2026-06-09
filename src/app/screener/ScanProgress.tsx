@@ -38,7 +38,13 @@ export function ScanProgress({ progress, startMs, exchange }: {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-      <div className="text-4xl animate-pulse">📡</div>
+      {/* Spinner — no emoji */}
+      <div className="relative w-12 h-12 shrink-0">
+        <svg className="w-12 h-12 animate-spin" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="19" stroke="#e2e8f0" strokeWidth="4"/>
+          <path d="M43 24C43 13.507 34.493 5 24 5" stroke="var(--mio-accent)" strokeWidth="4" strokeLinecap="round"/>
+        </svg>
+      </div>
       <div className="text-sm font-semibold text-gray-700 text-center">{phaseLabel}</div>
       <div className="w-full max-w-sm">
         <div className="flex justify-between text-[11px] text-gray-400 mb-1">

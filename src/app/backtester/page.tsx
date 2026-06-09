@@ -149,14 +149,14 @@ export default function BacktesterPage() {
       </p>
 
       {/* ── Config form ─────────────────────────────────────────────────── */}
-      <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-[#f8fbff]">
+      <div className="border border-gray-200 rounded-xl p-4 mb-4 bg-[#f8fafc]">
         <div className="grid grid-cols-2 gap-3 text-xs">
 
           {/* Screener selector */}
           <div className="col-span-2">
-            <label className="block font-semibold mb-1 text-gray-600">Load from saved screener</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Load from saved screener</label>
             <select
-              className="border border-gray-300 rounded px-2 py-1 w-full bg-white text-xs"
+              className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white text-xs focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={selectedId}
               onChange={e => onSelectScreener(e.target.value)}>
               <option value="">— custom formula below —</option>
@@ -168,10 +168,10 @@ export default function BacktesterPage() {
 
           {/* Formula */}
           <div className="col-span-2">
-            <label className="block font-semibold mb-1 text-gray-600">Formula</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Formula</label>
             <textarea
               rows={2}
-              className="border border-gray-300 rounded px-2 py-1.5 w-full font-mono text-[11px] resize-none focus:outline-none focus:border-blue-400"
+              className="border border-gray-200 rounded-lg px-2 py-1.5 w-full font-mono text-[11px] resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all bg-gray-50 focus:bg-white"
               value={formula}
               onChange={e => setFormula(e.target.value)}
               placeholder="e.g. rsi > 60 and sma20 > sma50 and volume > 500000"
@@ -180,8 +180,8 @@ export default function BacktesterPage() {
 
           {/* Exchange */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Exchange</label>
-            <select className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Exchange</label>
+            <select className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={exchange} onChange={e => setExchange(e.target.value)}>
               {["NSE","BSE","NYSE","NASDAQ","LSE","TSE"].map(ex => <option key={ex}>{ex}</option>)}
             </select>
@@ -189,40 +189,40 @@ export default function BacktesterPage() {
 
           {/* Entry date */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Entry date</label>
-            <input type="date" className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Entry date</label>
+            <input type="date" className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={entryDate} onChange={e => setEntryDate(e.target.value)} />
           </div>
 
           {/* Hold days */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Max hold (trading days)</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Max hold (trading days)</label>
             <input type="number" min={1} max={252}
-              className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+              className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={holdDays} onChange={e => setHoldDays(Number(e.target.value))} />
           </div>
 
           {/* Capital */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Starting capital (₹ / $)</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Starting capital (₹ / $)</label>
             <input type="number" min={1000}
-              className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+              className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={capital} onChange={e => setCapital(Number(e.target.value))} />
           </div>
 
           {/* Stop loss */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Stop loss %</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Stop loss %</label>
             <input type="number" min={0.5} max={50} step={0.5}
-              className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+              className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={stopLoss} onChange={e => setStopLoss(Number(e.target.value))} />
           </div>
 
           {/* Take profit */}
           <div>
-            <label className="block font-semibold mb-1 text-gray-600">Take profit %</label>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Take profit %</label>
             <input type="number" min={0.5} max={200} step={0.5}
-              className="border border-gray-300 rounded px-2 py-1 w-full bg-white"
+              className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
               value={takeProfit} onChange={e => setTakeProfit(Number(e.target.value))} />
           </div>
         </div>
@@ -240,13 +240,29 @@ export default function BacktesterPage() {
         {error && <p className="text-red-600 text-xs mt-2 bg-red-50 rounded px-2 py-1">{error}</p>}
       </div>
 
+      {/* ── Empty state ──────────────────────────────────────────────────── */}
+      {!result && !loading && (
+        <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
+          <div style={{ opacity: 0.22 }}>
+            <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="6" y="32" width="10" height="16" rx="2" fill="currentColor"/>
+              <rect x="22" y="22" width="10" height="26" rx="2" fill="currentColor"/>
+              <rect x="38" y="10" width="10" height="38" rx="2" fill="currentColor"/>
+              <polyline points="11,32 27,20 43,10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2.5" opacity="0.5"/>
+            </svg>
+          </div>
+          <div className="text-sm font-semibold text-gray-500">Configure and run a backtest</div>
+          <div className="text-xs text-gray-400 -mt-1 text-center max-w-xs leading-relaxed">Set your formula, entry date, and risk parameters above, then click <strong>Run Backtest</strong>.</div>
+        </div>
+      )}
+
       {/* ── Results ──────────────────────────────────────────────────────── */}
       {result && s && (
         <div className="space-y-4">
           {/* Summary cards */}
           <div className="grid grid-cols-3 gap-2 text-xs sm:grid-cols-5">
             {statCards.map(c => (
-              <div key={c.label} className="border border-gray-200 rounded-lg p-2.5 bg-white text-center shadow-sm">
+              <div key={c.label} className="border border-gray-200 rounded-xl p-2.5 bg-white text-center" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.05)"}}>
                 <div className="text-gray-400 text-[10px] mb-0.5">{c.label}</div>
                 <div className="font-bold text-base tabular-nums leading-tight"
                   style={{ color: c.color || "var(--mio-accent)" }}>{c.value}</div>
@@ -256,7 +272,7 @@ export default function BacktesterPage() {
           </div>
 
           {/* Equity curve */}
-          <div className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+          <div className="border border-gray-200 rounded-xl p-3 bg-white" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.05)"}}>
             <div className="text-xs font-semibold mb-2" style={{ color: "var(--mio-accent)" }}>
               Portfolio equity curve
               <span className="ml-2 text-[10px] text-gray-400 font-normal">
@@ -286,7 +302,7 @@ export default function BacktesterPage() {
           </div>
 
           {/* Trade list */}
-          <div className="border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
+          <div className="border border-gray-200 rounded-xl bg-white overflow-hidden" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.05)"}}>
             <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
               <span className="text-xs font-semibold" style={{ color: "var(--mio-accent)" }}>
                 Trade log ({result.trades.length} trades)
@@ -306,7 +322,7 @@ export default function BacktesterPage() {
                   {result.trades.map(t => (
                     <tr key={t.id} className="hover:bg-gray-50 border-b border-gray-100">
                       <td className="px-2 py-1 text-gray-400">{t.id}</td>
-                      <td className="px-2 py-1 font-bold" style={{ color: "#003399" }}>{t.symbol}</td>
+                      <td className="px-2 py-1 font-bold" style={{ color: "var(--mio-ticker)" }}>{t.symbol}</td>
                       <td className="px-2 py-1 text-gray-500 text-[10px]">{t.sector || "—"}</td>
                       <td className="px-2 py-1 tabular-nums">{t.entry.toLocaleString()}</td>
                       <td className="px-2 py-1 tabular-nums">{t.exit.toLocaleString()}</td>

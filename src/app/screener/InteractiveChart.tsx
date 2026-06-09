@@ -91,7 +91,14 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
   function onTouchEnd() { drag.current = null; pinch.current = null; }
 
   if (!visible.length)
-    return <div className="flex items-center justify-center text-gray-300 text-xs" style={{ height: TOTAL_H }}>No chart data</div>;
+    return (
+      <div className="flex flex-col items-center justify-center gap-1.5 text-gray-300" style={{ height: TOTAL_H }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span className="text-[11px]">No chart data</span>
+      </div>
+    );
 
   const W = w - PAD.l - PAD.r;
   const prices = visible.flatMap(d => [d.high, d.low]);
@@ -229,23 +236,49 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
         })()}
       </svg>
 
-      <div className="flex items-center gap-3 px-3 pb-1 text-[10px] text-gray-400">
-        <span title="Scroll to zoom · Drag to pan" className="cursor-help select-none opacity-40 hover:opacity-80 transition-opacity text-[11px]">ⓘ</span>
-        <div className="flex items-center border border-gray-200 rounded overflow-hidden">
-          <button onClick={() => setVB(v => Math.min(total, Math.max(10, v + Math.max(1, Math.round(v * 0.1)))))}
-            className="px-2 py-0.5 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none border-r border-gray-200" title="Zoom out">−</button>
-          <button onClick={() => setVB(v => Math.min(total, Math.max(10, v - Math.max(1, Math.round(v * 0.1)))))}
-            className="px-2 py-0.5 hover:bg-gray-100 text-gray-500 font-bold text-sm leading-none" title="Zoom in">+</button>
-        </div>
-        <button onClick={() => setS50(v => !v)}
-          className="ml-auto px-2 py-0.5 rounded border text-[10px]"
-          style={{ borderColor: showSma50 ? "#2f68c5" : "#e5e7eb", color: showSma50 ? "#2f68c5" : "#aaa", backgroundColor: showSma50 ? "#eff6ff" : "white" }}>
-          SMA50
+      <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5">
+        {/* Zoom out */}
+        <button
+          onClick={() => setVB(v => Math.min(total, Math.max(10, v + Math.max(1, Math.round(v * 0.1)))))}
+          title="Show more bars"
+          className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-base leading-none select-none">
+          −
         </button>
-        <span className="inline-flex items-center gap-1">
-          <span style={{ width: 16, borderTop: "2px solid #f97316", display: "inline-block" }}/>SMA20
-          {showSma50 && <><span style={{ width: 16, borderTop: "2px solid #3b82f6", display: "inline-block", marginLeft: 6 }}/>SMA50</>}
+        {/* Zoom in */}
+        <button
+          onClick={() => setVB(v => Math.min(total, Math.max(10, v - Math.max(1, Math.round(v * 0.1)))))}
+          title="Show fewer bars"
+          className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors text-base leading-none select-none">
+          +
+        </button>
+        <span className="text-[10px] text-gray-300 tabular-nums">{visibleBars}d</span>
+        {/* Info hint */}
+        <span title="Scroll to zoom · Drag to pan" className="cursor-help select-none text-gray-300 hover:text-gray-500 transition-colors">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+          </svg>
         </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* SMA50 toggle */}
+          <button onClick={() => setS50(v => !v)}
+            className="px-1.5 py-0.5 rounded text-[10px] font-medium transition-all"
+            style={{
+              border:           "1px solid",
+              borderColor:      showSma50 ? "var(--mio-accent)" : "#e5e7eb",
+              color:            showSma50 ? "var(--mio-accent)" : "#bbb",
+              backgroundColor:  showSma50 ? "#eff6ff" : "transparent",
+            }}>
+            SMA50
+          </button>
+          {/* Legend */}
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-400">
+            <span style={{ width: 12, borderTop: "2px solid #f97316", display: "inline-block" }}/>SMA20
+            {showSma50 && <>
+              <span style={{ width: 12, borderTop: "2px solid #3b82f6", display: "inline-block", marginLeft: 4 }}/>SMA50
+            </>}
+          </span>
+        </div>
       </div>
     </div>
   );

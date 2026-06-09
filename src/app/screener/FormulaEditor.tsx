@@ -135,12 +135,12 @@ export function FormulaEditor({
         <div className="flex gap-2">
           <button onClick={() => canSave && onRun(form)} disabled={!canSave}
             className="flex-1 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-40 flex items-center justify-center gap-1.5 shadow-sm transition-opacity"
-            style={{ backgroundColor: "#003366" }}>
+            style={{ backgroundColor: "var(--mio-accent)" }}>
             ▶ Run Screen
           </button>
           <button onClick={() => canSave && onSave(form)} disabled={!canSave}
             className="px-5 py-2 rounded-lg text-sm font-semibold border disabled:opacity-40 transition-colors hover:bg-blue-50"
-            style={{ borderColor: "#003366", color: "#003366", backgroundColor: "white" }}>
+            style={{ borderColor: "var(--mio-accent)", color: "var(--mio-accent)", backgroundColor: "white" }}>
             Save
           </button>
           <button onClick={onCancel}
