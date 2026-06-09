@@ -2491,6 +2491,79 @@ def _fetch_fresh_5min_bars(tickers: List[str]) -> Dict[str, Dict]:
     return result
 
 
+def _refresh_matched_intraday_bars(
+    tickers: List[str],
+    exchange: str,
+    bar_min: int,
+    ohlcv_data: Dict[str, pd.DataFrame],
+) -> None:
+    """Synchronously refresh today's intraday bars for matched tickers only.
+
+    The background top-up updates the cache for the NEXT scan — so the current
+    scan can show a stale last bar (e.g. 13:00 when 14:15 has been complete for
+    an hour). This function downloads today's 15-min data from yfinance for the
+    small matched list (~20-100 tickers), resamples to bar_min, and stitches the
+    fresh today-bars into ohlcv_data IN-PLACE before the OHLCV enrichment pass.
+    """
+    if not tickers:
+        return
+    today_str = datetime.date.today().isoformat()
+    ts_today  = pd.Timestamp(today_str)
+    try:
+        raw = yf.download(
+            tickers, period="1d", interval="15m",
+            auto_adjust=True, progress=False,
+            group_by="ticker", threads=True,
+        )
+        if raw is None or raw.empty:
+            return
+        refreshed = 0
+        for ticker in tickers:
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                    lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                            if raw.columns.nlevels > 1 else [])
+                    if ticker in lvl0:
+                        df_15 = raw[ticker].copy()
+                    elif ticker in lvl1:
+                        df_15 = raw.xs(ticker, axis=1, level=1).copy()
+                    else:
+                        continue
+                    if isinstance(df_15.columns, pd.MultiIndex):
+                        df_15.columns = df_15.columns.get_level_values(-1)
+                else:
+                    df_15 = raw.copy()
+
+                df_15 = df_15[[c for c in ["Open", "High", "Low", "Close", "Volume"]
+                                if c in df_15.columns]].dropna(subset=["Close"])
+                if df_15.empty:
+                    continue
+
+                # Resample to bar_min — _resample_intraday drops still-forming bars
+                df_today = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
+                if df_today is None or df_today.empty:
+                    continue
+
+                # Stitch: strip stale today-rows from cache, append fresh resampled bars
+                hist = ohlcv_data.get(ticker)
+                if hist is None or hist.empty:
+                    continue
+                try:
+                    mask = hist.index.normalize() >= ts_today
+                except Exception:
+                    mask = hist.index >= ts_today
+                ohlcv_data[ticker] = pd.concat([hist[~mask], df_today])
+                refreshed += 1
+            except Exception:
+                continue
+        if refreshed:
+            print(f"[screener] _refresh_matched_intraday_bars ({bar_min}m): "
+                  f"{refreshed}/{len(tickers)} tickers updated")
+    except Exception as e:
+        print(f"[screener] _refresh_matched_intraday_bars error: {type(e).__name__}: {e}")
+
+
 def _fetch_live_nse_bars(tickers: List[str]) -> Dict[str, Dict]:
     """Live OHLCV for NSE tickers.
     Priority order:
@@ -2746,6 +2819,16 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             _SCREEN_PROGRESS["done"] = i + 1
             if ind and apply_filters(ind, filters):
                 matched_tickers_intra.append(ticker)
+        # Refresh today's bars for matched tickers synchronously.
+        # The cache top-up is background (keeps filter pass fast), so the
+        # current scan may have a stale last bar. Re-fetch today's 15-min data
+        # for just the matched tickers (~20-100) and restitch before chart build.
+        if not as_of_date and matched_tickers_intra:
+            try:
+                _refresh_matched_intraday_bars(matched_tickers_intra, exchange, bar_min, ohlcv_data)
+            except Exception as _re:
+                print(f"[screener] intraday matched refresh error: {_re}")
+
         # Rebuild with full OHLCV only for matched tickers
         matched: List[Dict] = []
         for ticker in matched_tickers_intra:
