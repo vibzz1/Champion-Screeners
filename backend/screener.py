@@ -2899,14 +2899,15 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             matched_tickers.append(result)
 
     # Refresh today's bar for matched tickers with fresh yfinance 5-min data.
-    # The 75-min intraday cache (used in _inject_today_from_intraday) can be
-    # 75–150 min stale, making the chart's last candle show an old close price.
-    # Since matched_tickers is small (~20-100 vs 2109 total), this is fast (~3-5s).
-    if not as_of_date and matched_tickers and exchange in ("NSE", "BSE") and _is_market_open(exchange):
+    # Condition: live scan (no as_of_date) AND bhavcopy/cache hasn't updated yet
+    # (cache_has_today=False). Once bhavcopy lands (~19:00 IST) cache_has_today
+    # becomes True and the authoritative EOD data is used as-is.
+    # No exchange or market-hours filter — applies to NSE, BSE, US, all others.
+    if not as_of_date and matched_tickers and not cache_has_today:
         try:
             fresh = _fetch_fresh_5min_bars(matched_tickers)
             if fresh:
-                live_bars.update(fresh)   # fresh 5m close overrides stale 75m close
+                live_bars.update(fresh)   # fresh 5m close overrides stale source
         except Exception as _fe:
             print(f"[screener] matched fresh-bar refresh error: {_fe}")
 
