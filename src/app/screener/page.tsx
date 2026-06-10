@@ -42,7 +42,7 @@ const ALL_COLS = [
 ] as const;
 type ColId = typeof ALL_COLS[number]["id"];
 const ALL_COL_IDS: ColId[] = ALL_COLS.map(c => c.id);
-const DEFAULT_HIDDEN: ColId[] = ["industry", "sma200"];
+const DEFAULT_HIDDEN: ColId[] = ["industry", "sma200", "earnings"];
 
 // ── Fetch with exponential-backoff retry ─────────────────────────────────────
 async function fetchWithRetry(
@@ -77,6 +77,13 @@ function emit(type: string, detail: object = {}) {
 const CAP_COLORS: Record<string, string> = {
   Mega: "#7c3aed", Large: "#173ead", Mid: "#0f766e", Small: "#92400e",
 };
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
 
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function ScreenerPage() {
@@ -665,7 +672,7 @@ export default function ScreenerPage() {
               {r.symbol}
             </button>
             {r.new_52w_high && <span className="ml-1 text-[10px] bg-green-100 text-green-700 rounded px-1">52H</span>}
-            {isNew    && <span className="ml-1 text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New in this scan vs yesterday">🆕</span>}
+            {isNew    && <span className="ml-1 text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New in this scan vs yesterday">NEW</span>}
             {isRepeat && <span className="ml-1 text-[10px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan too">✓</span>}
             {watchlistSyms.has(r.symbol) && (
               <span className="ml-1 text-[10px] px-1 rounded font-bold" title="In your watchlist"
@@ -718,7 +725,7 @@ export default function ScreenerPage() {
         return (
           <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: volSurge ? "#ea580c" : "#4b5563" }}>
             {fmtVol(r.volume)}
-            {volSurge && r.avg_vol_20 && <span className="ml-0.5 text-[10px] font-bold text-orange-500">⚡{(r.volume / r.avg_vol_20).toFixed(1)}×</span>}
+            {volSurge && r.avg_vol_20 && <span className="ml-0.5 text-[10px] font-bold text-orange-500">{(r.volume / r.avg_vol_20).toFixed(1)}×</span>}
           </td>
         );
       case "rsi":
@@ -963,7 +970,7 @@ export default function ScreenerPage() {
                         <td className="px-2 py-1 font-bold text-[13px] tabular-nums">{r.price?.toLocaleString()}</td>
                         <td className="px-2 py-1 font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</td>
                         <td className="px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
-                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[10px] font-bold text-orange-500">⚡{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
+                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[10px] font-bold text-orange-500">{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
                         </td>
                         <td className="px-2 py-1">
                           {r.rsi!=null
@@ -1069,7 +1076,7 @@ export default function ScreenerPage() {
                         <span className="font-semibold tabular-nums" style={{color:"var(--mio-accent)"}}>{displayResults.length}<span className="font-normal text-gray-400 ml-0.5">{displayResults.length!==1?" matches":" match"}{displayResults.length!==results.length?` / ${results.length}`:""}</span></span>
                         {/* Timing — lighter */}
                         {scanDuration != null && (
-                          <span className="text-[10px] text-gray-400 tabular-nums">{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
+                          <span className="text-[10px] text-gray-400 tabular-nums">{fmtDuration(scanDuration)}</span>
                         )}
                         {/* Data timestamp */}
                         {lastRefreshed && (
@@ -1404,7 +1411,7 @@ export default function ScreenerPage() {
                                 </button>
                                 <span className="font-bold text-sm sm:text-base" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
                                 {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                                {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
+                                {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">NEW</span>}
                                 {isRepeat&&<span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
                                 {dayCount != null && dayCount > 1 && (
                                   <span className="text-[10px] px-1 rounded font-bold"
@@ -1457,7 +1464,7 @@ export default function ScreenerPage() {
                               </button>
                               <span className="font-bold text-sm" style={{color:"var(--mio-ticker)"}}>{r.symbol}</span>
                               {r.new_52w_high&&<span className="text-[10px] bg-green-100 text-green-700 rounded px-1 font-semibold">52H</span>}
-                              {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">🆕</span>}
+                              {isNew   &&<span className="text-[10px] bg-blue-100 text-blue-700 rounded px-1 font-semibold" title="New vs yesterday">NEW</span>}
                               {isRepeat&&<span className="text-[10px] bg-gray-100 text-gray-500 rounded px-1" title="Was in yesterday's scan">✓</span>}
                               {dayCount != null && dayCount > 1 && (
                                 <span className="text-[10px] px-1 rounded font-bold"
@@ -1520,7 +1527,7 @@ export default function ScreenerPage() {
                   </>}
                   {scanDuration != null && <>
                     <span className="mx-1 text-gray-300">·</span>
-                    <span>{scanDuration < 1000 ? `${scanDuration}ms` : `${(scanDuration/1000).toFixed(1)}s`}</span>
+                    <span>{fmtDuration(scanDuration)}</span>
                   </>}
                 </div>
                 <div className="text-xs text-gray-300 max-w-xs text-center leading-relaxed mt-1">

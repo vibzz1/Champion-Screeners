@@ -151,11 +151,11 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
       onMouseUp={onMouseUp} onMouseLeave={onMouseLeave}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <svg width={w} height={TOTAL_H} style={{ display: "block" }}>
-        <line x1={PAD.l} y1={VOL_TOP - 1} x2={PAD.l + W} y2={VOL_TOP - 1} stroke="#e5e7eb" strokeWidth={0.5}/>
+        <line x1={PAD.l} y1={VOL_TOP - 1} x2={PAD.l + W} y2={VOL_TOP - 1} stroke="var(--mio-border)" strokeWidth={0.5}/>
         {priceTicks.map((p, i) => (
           <g key={i}>
-            <line x1={PAD.l} y1={sy(p)} x2={PAD.l + W} y2={sy(p)} stroke="#f0f0f0" strokeWidth={0.5}/>
-            <text x={PAD.l + W + 4} y={sy(p) + 3} fontSize={9} fill="#bbb">
+            <line x1={PAD.l} y1={sy(p)} x2={PAD.l + W} y2={sy(p)} stroke="var(--mio-border2)" strokeWidth={0.5}/>
+            <text x={PAD.l + W + 4} y={sy(p) + 3} fontSize={9} fill="var(--mio-text3)">
               {p >= 1000 ? `${(p / 1000).toFixed(1)}k` : p.toFixed(p < 10 ? 2 : 0)}
             </text>
           </g>
@@ -175,16 +175,16 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
         {sma20segs.map((pts, i) => <polyline key={i} points={pts.join(" ")} fill="none" stroke="#f97316" strokeWidth={1.5} opacity={0.9}/>)}
         {sma50segs.map((pts, i) => <polyline key={i} points={pts.join(" ")} fill="none" stroke="#3b82f6" strokeWidth={1.5} opacity={0.9}/>)}
 
-        <text x={PAD.l + 3} y={VOL_TOP + 10} fontSize={8} fill="#bbb">Vol</text>
-        <text x={PAD.l + W + 4} y={VOL_TOP + 10} fontSize={8} fill="#bbb">{fmtV(maxV)}</text>
-        <text x={PAD.l + W + 4} y={VOL_TOP + VOL_H / 2 + 3} fontSize={8} fill="#bbb">{fmtV(maxV / 2)}</text>
-        <line x1={PAD.l} y1={VOL_TOP + VOL_H / 2} x2={PAD.l + W} y2={VOL_TOP + VOL_H / 2} stroke="#f0f0f0" strokeWidth={0.5}/>
+        <text x={PAD.l + 3} y={VOL_TOP + 10} fontSize={8} fill="var(--mio-text3)">Vol</text>
+        <text x={PAD.l + W + 4} y={VOL_TOP + 10} fontSize={8} fill="var(--mio-text3)">{fmtV(maxV)}</text>
+        <text x={PAD.l + W + 4} y={VOL_TOP + VOL_H / 2 + 3} fontSize={8} fill="var(--mio-text3)">{fmtV(maxV / 2)}</text>
+        <line x1={PAD.l} y1={VOL_TOP + VOL_H / 2} x2={PAD.l + W} y2={VOL_TOP + VOL_H / 2} stroke="var(--mio-border2)" strokeWidth={0.5}/>
         {visible.map((bar, i) => {
           const bull = bar.close >= bar.open;
           return <rect key={i} x={cx(i) - bodyW / 2} y={volBarY(bar.volume)} width={bodyW} height={volBarH(bar.volume)} fill={bull ? "#16a34a" : "#dc2626"} opacity={0.55}/>;
         })}
-        <text x={PAD.l + 4} y={TOTAL_H - 6} fontSize={9} fill="#bbb">{visible[0]?.date?.split(" ")[0]} – {visible[visible.length - 1]?.date}</text>
-        <text x={PAD.l + W} y={TOTAL_H - 6} fontSize={9} fill="#bbb" textAnchor="end">{visible.length}d</text>
+        <text x={PAD.l + 4} y={TOTAL_H - 6} fontSize={9} fill="var(--mio-text3)">{visible[0]?.date?.split(" ")[0]} – {visible[visible.length - 1]?.date}</text>
+        <text x={PAD.l + W} y={TOTAL_H - 6} fontSize={9} fill="var(--mio-text3)" textAnchor="end">{visible.length}d</text>
 
         {/* ── Crosshair + OHLCV tooltip ── */}
         {hoveredIdx !== null && (() => {
@@ -265,14 +265,14 @@ export function InteractiveChart({ data, masterBars, priceHeight = 230 }: {
             className="px-1.5 py-0.5 rounded text-[10px] font-medium transition-all"
             style={{
               border:           "1px solid",
-              borderColor:      showSma50 ? "var(--mio-accent)" : "#e5e7eb",
-              color:            showSma50 ? "var(--mio-accent)" : "#bbb",
-              backgroundColor:  showSma50 ? "#eff6ff" : "transparent",
+              borderColor:      showSma50 ? "var(--mio-accent)" : "var(--mio-border)",
+              color:            showSma50 ? "var(--mio-accent)" : "var(--mio-text3)",
+              backgroundColor:  showSma50 ? "var(--mio-sort-bg)" : "transparent",
             }}>
             SMA50
           </button>
           {/* Legend */}
-          <span className="inline-flex items-center gap-1 text-[10px] text-gray-400">
+          <span className="inline-flex items-center gap-1 text-[10px]" style={{ color: "var(--mio-text3)" }}>
             <span style={{ width: 12, borderTop: "2px solid #f97316", display: "inline-block" }}/>SMA20
             {showSma50 && <>
               <span style={{ width: 12, borderTop: "2px solid #3b82f6", display: "inline-block", marginLeft: 4 }}/>SMA50
