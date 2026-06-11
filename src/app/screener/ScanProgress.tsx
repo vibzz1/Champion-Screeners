@@ -37,34 +37,35 @@ export function ScanProgress({ progress, startMs, exchange }: {
     : "Large universe. You can run a smaller scan while waiting.";
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-      {/* Spinner — no emoji */}
-      <div className="relative w-12 h-12 shrink-0">
-        <svg className="w-12 h-12 animate-spin" viewBox="0 0 48 48" fill="none">
-          <circle cx="24" cy="24" r="19" stroke="#e2e8f0" strokeWidth="4"/>
+    <div className="flex-1 flex items-center justify-center px-6">
+      <div className="w-full max-w-md flex flex-col items-center gap-5 bg-white border border-gray-200 rounded-xl px-8 py-10"
+        style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+        {/* Spinner — no emoji */}
+        <svg className="w-11 h-11 animate-spin shrink-0" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="19" stroke="var(--mio-border)" strokeWidth="4"/>
           <path d="M43 24C43 13.507 34.493 5 24 5" stroke="var(--mio-accent)" strokeWidth="4" strokeLinecap="round"/>
         </svg>
-      </div>
-      <div className="text-sm font-semibold text-gray-700 text-center">{phaseLabel}</div>
-      <div className="w-full max-w-sm">
-        <div className="flex justify-between text-[11px] text-gray-400 mb-1">
-          <span>{isCache ? "100%" : `${pct}%`}</span>
-          <span className="tabular-nums">⏱ {elapsedStr}</span>
-        </div>
-        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: isCache ? "100%" : phase === "connecting" ? "4%" : `${Math.max(4, pct)}%`,
-              background: isCache ? "#16a34a" : "linear-gradient(90deg,#3b82f6,#6366f1)",
-            }}/>
-        </div>
-        {!isCache && progress && progress.total > 0 && (
-          <div className="text-[10px] text-gray-400 mt-1 text-center tabular-nums">
-            {progress.done} / {progress.total} {phase === "filtering" ? "stocks filtered" : "batches downloaded"}
+        <div className="text-sm font-semibold text-gray-700 text-center">{phaseLabel}</div>
+        <div className="w-full">
+          <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+            <span className="tabular-nums">{isCache ? "100%" : `${pct}%`}</span>
+            <span className="tabular-nums">{elapsedStr}</span>
           </div>
-        )}
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-700"
+              style={{
+                width: isCache ? "100%" : phase === "connecting" ? "4%" : `${Math.max(4, pct)}%`,
+                background: isCache ? "var(--mio-up)" : "linear-gradient(90deg,#3b82f6,#6366f1)",
+              }}/>
+          </div>
+          {!isCache && progress && progress.total > 0 && (
+            <div className="text-[10px] text-gray-400 mt-1.5 text-center tabular-nums">
+              {progress.done} / {progress.total} {phase === "filtering" ? "stocks filtered" : "batches downloaded"}
+            </div>
+          )}
+        </div>
+        <div className="text-[11px] text-gray-400 text-center leading-relaxed border-t border-gray-100 pt-4 w-full">{hint}</div>
       </div>
-      <div className="text-[11px] text-gray-400 text-center max-w-xs leading-relaxed">{hint}</div>
     </div>
   );
 }

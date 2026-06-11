@@ -80,9 +80,11 @@ export default function PortfolioPage() {
 
       {/* Error banner */}
       {error && (
-        <div className="flex items-start gap-3 mb-4 px-4 py-3 rounded-lg border text-xs"
+        <div className="flex items-start gap-3 mb-4 px-4 py-3 rounded-xl border text-xs"
           style={{ backgroundColor: "var(--mio-dn-bg)", borderColor: "var(--mio-dn)", color: "var(--mio-dn)" }}>
-          <span className="text-base leading-none mt-0.5">🔌</span>
+          <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.5" r="0.5" fill="currentColor"/>
+          </svg>
           <div className="flex-1">
             <div className="font-semibold mb-0.5">Backend offline</div>
             <div style={{ color: "var(--mio-text2)" }}>{error}</div>
@@ -104,7 +106,7 @@ export default function PortfolioPage() {
             color: totalPnL >= 0 ? "var(--mio-up)" : "var(--mio-dn)",
           },
         ].map((c) => (
-          <div key={c.label} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+          <div key={c.label} className="border border-gray-200 rounded-xl p-3 bg-white" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
             <div className="text-gray-400 text-[10px] mb-0.5">{c.label}</div>
             <div className="font-bold text-sm tabular-nums" style={{ color: c.color || "var(--mio-accent)" }}>{c.value}</div>
           </div>
@@ -115,7 +117,7 @@ export default function PortfolioPage() {
       <div className="mb-3">
         <button
           onClick={() => setShowForm(!showForm)}
-          className="px-3 py-1.5 text-xs text-white rounded font-semibold transition-opacity hover:opacity-90"
+          className="px-3 py-1.5 text-xs text-white rounded-lg font-semibold transition-opacity hover:opacity-90"
           style={{ backgroundColor: "var(--mio-accent)" }}>
           {showForm ? "Cancel" : "+ Add Position"}
         </button>
@@ -123,7 +125,7 @@ export default function PortfolioPage() {
 
       {/* Add form */}
       {showForm && (
-        <div className="border border-gray-200 rounded-lg p-4 mb-4 bg-[#f8fbff] text-xs">
+        <div className="border border-gray-200 rounded-xl p-4 mb-4 bg-[#f8fafc] text-xs">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
               { label: "Symbol *",      key: "symbol",        placeholder: "RELIANCE",    type: "text"   },
@@ -134,10 +136,10 @@ export default function PortfolioPage() {
               { label: "Buy Date *",    key: "buy_date",      placeholder: "2024-01-15",   type: "date"   },
             ].map((f) => (
               <div key={f.key}>
-                <label className="block font-semibold mb-1 text-gray-600">{f.label}</label>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">{f.label}</label>
                 <input
                   type={f.type}
-                  className="border border-gray-200 rounded px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400"
+                  className="border border-gray-200 rounded-lg px-2 py-1 w-full bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 transition-all"
                   placeholder={f.placeholder}
                   value={form[f.key as keyof typeof form]}
                   onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
@@ -147,7 +149,7 @@ export default function PortfolioPage() {
           </div>
           <button
             onClick={addPosition}
-            className="mt-3 px-4 py-1.5 text-xs text-white rounded font-semibold transition-opacity hover:opacity-90"
+            className="mt-3 px-4 py-1.5 text-xs text-white rounded-lg font-semibold transition-opacity hover:opacity-90"
             style={{ backgroundColor: "var(--mio-accent)" }}>
             Add to Portfolio
           </button>
@@ -156,13 +158,17 @@ export default function PortfolioPage() {
 
       {/* Table */}
       {positions.length === 0 && !error ? (
-        <div className="flex flex-col items-center justify-center py-16 text-gray-400 border border-gray-200 rounded-lg bg-white">
-          <div className="text-4xl mb-3 opacity-40">💼</div>
-          <div className="text-sm font-medium">No positions yet</div>
-          <div className="text-xs mt-1 text-gray-300">Click "+ Add Position" above to get started</div>
+        <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400 border border-gray-200 rounded-xl bg-white" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
+            <rect x="2" y="7" width="20" height="14" rx="2"/>
+            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+            <line x1="2" y1="13" x2="22" y2="13"/>
+          </svg>
+          <div className="text-sm font-medium text-gray-500">No positions yet</div>
+          <div className="text-xs text-gray-400 -mt-1">Click "+ Add Position" above to get started</div>
         </div>
       ) : positions.length > 0 ? (
-        <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white shadow-sm">
+        <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="bg-gray-50 text-left border-b border-gray-200">

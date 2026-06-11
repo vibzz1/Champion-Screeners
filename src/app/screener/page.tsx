@@ -85,6 +85,13 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
+function fmtAge(minutes: number): string {
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+  const d = Math.floor(minutes / (24 * 60));
+  return `${d}d ago`;
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function ScreenerPage() {
   const [screeners, setScreeners]   = useState<SavedScreener[]>([]);
@@ -116,6 +123,7 @@ export default function ScreenerPage() {
   const [scanProgress, setScanProgress]   = useState<{phase:string;done:number;total:number;exchange:string;bar_min:number}|null>(null);
   const scanStartRef = useRef<number>(0);
   const [resultSearch, setRS]        = useState("");
+  const [chipsExpanded, setChipsExpanded] = useState(false);
   const [chartSize, setChartSize]    = useState<"sm"|"md"|"lg">("md");
   const [chartCols, setChartCols]    = useState<1|2>(2);
   const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
@@ -334,6 +342,7 @@ export default function ScreenerPage() {
     setPage(1);
     setSF("All");
     setCF("All");
+    setChipsExpanded(false);
     setPrevTS(null);
     setScanDiff(null);
     try {
@@ -797,14 +806,20 @@ export default function ScreenerPage() {
           {PAGE_SIZES.map(s=><option key={s} value={s}>{s} / page</option>)}
         </select>
       </div>
-      {total>1 && <div className="flex gap-1">
-        <button onClick={()=>goToPage(Math.max(1,page-1))} disabled={page===1} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"var(--mio-ticker)"}}>◀</button>
+      {total>1 && <div className="flex gap-1 items-center">
+        <button onClick={()=>goToPage(Math.max(1,page-1))} disabled={page===1}
+          className="w-6 h-5 flex items-center justify-center border border-gray-200 rounded disabled:opacity-30 hover:bg-gray-50 transition-colors" style={{color:"var(--mio-ticker)"}} title="Previous page">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
         {Array.from({length:Math.min(total,7)},(_,i)=>{
           const p=total<=7?i+1:page<=4?i+1:page>=total-3?total-6+i:page-3+i;
-          return <button key={p} onClick={()=>goToPage(p)} className="w-6 h-5 rounded text-center"
-            style={{backgroundColor:page===p?"var(--mio-accent)":undefined,color:page===p?"white":"var(--mio-ticker)",border:page===p?"none":"1px solid #d1d5db"}}>{p}</button>;
+          return <button key={p} onClick={()=>goToPage(p)} className="w-6 h-5 rounded text-center tabular-nums transition-colors"
+            style={{backgroundColor:page===p?"var(--mio-accent)":undefined,color:page===p?"white":"var(--mio-ticker)",border:page===p?"none":"1px solid var(--mio-border)"}}>{p}</button>;
         })}
-        <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total} className="px-2 py-0.5 border border-gray-300 rounded disabled:opacity-40" style={{color:"var(--mio-ticker)"}}>▶</button>
+        <button onClick={()=>goToPage(Math.min(total,page+1))} disabled={page===total}
+          className="w-6 h-5 flex items-center justify-center border border-gray-200 rounded disabled:opacity-30 hover:bg-gray-50 transition-colors" style={{color:"var(--mio-ticker)"}} title="Next page">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
       </div>}
       <button onClick={()=>window.scrollTo({top:0,behavior:"smooth"})}
         className="px-2 py-0.5 border border-gray-300 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-50">↑ Top</button>
@@ -921,10 +936,12 @@ export default function ScreenerPage() {
               )}
             </div>
             {favResults.length === 0 && (
-              <div className="flex flex-col items-center justify-center flex-1 text-gray-400">
-                <div className="text-4xl mb-3">☆</div>
-                <div className="text-sm font-medium">No favorites yet</div>
-                <div className="text-xs mt-1 text-gray-300">Click ☆ on any stock in a scan to save it here</div>
+              <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                <div className="text-sm font-medium text-gray-500">No favorites yet</div>
+                <div className="text-xs text-gray-400 -mt-1">Click ☆ on any stock in a scan to save it here</div>
               </div>
             )}
             {favResults.length > 0 && favView === "overview" && (
@@ -953,7 +970,7 @@ export default function ScreenerPage() {
                   <tbody>
                     {favPaged.map((r,idx)=>{
                       const up=(r.change_pct??0)>=0;
-                      const rc=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
+                      const rc=r.rsi==null?"var(--mio-text3)":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"var(--mio-text)";
                       const volSurge = !!(r.avg_vol_20 && r.avg_vol_20 > 0 && r.volume > r.avg_vol_20 * 2);
                       return <tr key={r.ticker} className={`${volSurge?"bg-orange-50/60 hover:bg-orange-50":"hover:bg-slate-50"} border-b border-gray-100 transition-all`}>
                         <td className="px-1 py-1 text-center">
@@ -975,7 +992,7 @@ export default function ScreenerPage() {
                         <td className="px-2 py-1">
                           {r.rsi!=null
                             ? <span className="inline-block tabular-nums font-bold px-1.5 py-0.5 rounded text-[11px]"
-                                style={{color:rc,backgroundColor:r.rsi>70?"#fee2e2":r.rsi<30?"#dcfce7":"#f3f4f6"}}>
+                                style={{color:rc,backgroundColor:r.rsi>70?"var(--mio-dn-bg)":r.rsi<30?"var(--mio-up-bg)":"var(--mio-neutral-bg)"}}>
                                 {r.rsi}
                               </span>
                             : <span className="text-gray-400">—</span>}
@@ -987,7 +1004,7 @@ export default function ScreenerPage() {
                         </td>
                         <td className="px-2 py-1 tabular-nums" style={{color:r.sma20!=null&&r.price>r.sma20?"var(--mio-up)":"var(--mio-dn)"}}>{r.sma20??"—"}</td>
                         <td className="px-2 py-1 tabular-nums" style={{color:r.sma50!=null&&r.price>r.sma50?"var(--mio-up)":"var(--mio-dn)"}}>{r.sma50??"—"}</td>
-                        <td className="px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
+                        <td className="px-2 py-1 tabular-nums" style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"var(--mio-text2)"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</td>
                         <td className="px-2 py-1 whitespace-nowrap tabular-nums" style={{color:earningsColor(earnings[r.ticker]??""),fontWeight:earnings[r.ticker]?600:400}}>{fmtEarnings(earnings[r.ticker]??"")}</td>
                         <td className="px-0 py-0">{r.sparkline.length>0&&<Sparkline data={r.sparkline} positive={up}/>}</td>
                       </tr>;
@@ -1001,7 +1018,7 @@ export default function ScreenerPage() {
               <div ref={resultsRef} className="flex-1 overflow-auto p-3 flex flex-col gap-3">
                 {favPaged.map(r=>{
                   const up=(r.change_pct??0)>=0;
-                  const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
+                  const rsiCol=r.rsi==null?"var(--mio-text3)":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"var(--mio-text)";
                   return (
                     <div key={r.ticker} className="border border-gray-200 rounded-xl bg-white overflow-hidden w-full" style={{boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                       <div className="px-3 sm:px-4 py-2 border-b border-gray-100">
@@ -1082,7 +1099,7 @@ export default function ScreenerPage() {
                         {lastRefreshed && (
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${stale?"bg-amber-100 text-amber-700":"text-gray-400"}`}
                             title={stale?"Data may be stale — re-run to refresh":undefined}>
-                            {stale?"⚠ as of ":"as of "}{lastRefreshed.toTimeString().slice(0,5)}{minAgo&&minAgo>0?` · ${minAgo}m ago`:""}
+                            {stale?"⚠ as of ":"as of "}{lastRefreshed.toTimeString().slice(0,5)}{minAgo&&minAgo>0?` · ${fmtAge(minAgo)}`:""}
                           </span>
                         )}
                       </>;
@@ -1210,37 +1227,45 @@ export default function ScreenerPage() {
                 </div>
               )}
 
-              {/* Row 2: sector chips — with visible "All" chip (⑤ active state always visible) */}
-              {!loading && sectorCounts.length>0 && (
-                <div className="px-3 pb-1.5 flex items-center gap-2">
-                  <div className="relative flex-1 min-w-0">
-                    <div className="flex gap-1.5 items-center overflow-x-auto" style={{scrollbarWidth:"none",msOverflowStyle:"none"}}>
-                      {/* "All" chip — always visible, active when no filter */}
-                      <button onClick={()=>{setSF("All");setRS("");goToPage(1);}}
+              {/* Row 2: sector chips — top 8 + "+N more" expander; selected chip always shown */}
+              {!loading && sectorCounts.length>0 && (()=>{
+                const CHIP_LIMIT = 8;
+                const overflow   = sectorCounts.length - CHIP_LIMIT;
+                let shown = chipsExpanded ? sectorCounts : sectorCounts.slice(0, CHIP_LIMIT);
+                // Keep the active filter visible even if it lives in the overflow
+                if (!chipsExpanded && sectorFilter !== "All" && !shown.some(([s]) => s === sectorFilter)) {
+                  const hit = sectorCounts.find(([s]) => s === sectorFilter);
+                  if (hit) shown = [...shown.slice(0, CHIP_LIMIT - 1), hit];
+                }
+                const chipStyle = (active: boolean): React.CSSProperties => ({
+                  backgroundColor: active ? "var(--mio-accent)" : "var(--mio-surface2)",
+                  color:           active ? "white" : "var(--mio-text2)",
+                  borderColor:     active ? "var(--mio-accent)" : "var(--mio-border)",
+                });
+                return (
+                  <div className="px-3 pb-1.5 flex items-center gap-1.5 flex-wrap">
+                    <button onClick={()=>{setSF("All");setRS("");goToPage(1);}}
+                      className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
+                      style={chipStyle(sectorFilter==="All")}>
+                      All
+                    </button>
+                    {shown.map(([sec,cnt])=>(
+                      <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
                         className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
-                        style={{
-                          backgroundColor: sectorFilter==="All"?"var(--mio-accent)":"#f1f5f9",
-                          color:           sectorFilter==="All"?"white":"#475569",
-                          borderColor:     sectorFilter==="All"?"var(--mio-accent)":"#e2e8f0",
-                        }}>
-                        All
+                        style={chipStyle(sectorFilter===sec)}>
+                        {sec} <span className="opacity-70">{cnt}</span>
                       </button>
-                      {sectorCounts.map(([sec,cnt])=>(
-                        <button key={sec} onClick={()=>{setSF(sectorFilter===sec?"All":sec);setRS("");goToPage(1);}}
-                          className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors"
-                          style={{
-                            backgroundColor: sectorFilter===sec?"var(--mio-accent)":"#f1f5f9",
-                            color:           sectorFilter===sec?"white":"#475569",
-                            borderColor:     sectorFilter===sec?"var(--mio-accent)":"#e2e8f0",
-                          }}>
-                          {sec} <span className="opacity-70">{cnt}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"/>
+                    ))}
+                    {overflow > 0 && (
+                      <button onClick={()=>setChipsExpanded(v=>!v)}
+                        className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-dashed transition-colors hover:bg-blue-50"
+                        style={{ borderColor: "var(--mio-border)", color: "var(--mio-accent)", backgroundColor: "transparent" }}>
+                        {chipsExpanded ? "− less" : `+${overflow} more`}
+                      </button>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* ── Scan diff banner ────────────────────────────────────────── */}
@@ -1392,7 +1417,7 @@ export default function ScreenerPage() {
                 <div className={`p-3 grid gap-3 ${chartCols===2?"grid-cols-2":"grid-cols-1"}`}>
                   {paged.map(r=>{
                     const up=(r.change_pct??0)>=0;
-                    const rsiCol=r.rsi==null?"#aaa":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"#222";
+                    const rsiCol=r.rsi==null?"var(--mio-text3)":r.rsi>70?"var(--mio-dn)":r.rsi<30?"var(--mio-up)":"var(--mio-text)";
                     const isNew    = prevTickerSet !== null && !prevTickerSet.has(r.ticker);
                     const isRepeat = prevTickerSet !== null && prevTickerSet.has(r.ticker);
                     const dayCount = daysInScanMap[r.ticker];
@@ -1448,7 +1473,7 @@ export default function ScreenerPage() {
                               <span className="text-gray-300 hidden sm:inline">·</span>
                               <span className="text-gray-400">SMA20 <strong className="text-gray-600">{r.sma20??"—"}</strong></span>
                               <span className="text-gray-400">SMA50 <strong className="text-gray-600">{r.sma50??"—"}</strong></span>
-                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
+                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"var(--mio-text2)"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
                               <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
                                 className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
                                 title="Open on TradingView">TV ↗</a>
@@ -1489,7 +1514,7 @@ export default function ScreenerPage() {
                               <span>RSI <strong style={{color:rsiCol}}>{r.rsi??"—"}</strong></span>
                               <span style={{color:r.macd_bullish?"var(--mio-up)":"var(--mio-dn)",fontWeight:600}}>{r.macd_bullish?"▲ Bull":"▼ Bear"}</span>
                               <span>Vol <strong className="text-gray-700">{fmtVol(r.volume)}</strong></span>
-                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"#555"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
+                              <span className="text-gray-400">%52H <strong style={{color:(r.pct_from_52w_high??-99)>=-5?"var(--mio-up)":"var(--mio-text2)"}}>{r.pct_from_52w_high!=null?`${r.pct_from_52w_high}%`:"—"}</strong></span>
                               {earnings[r.ticker] && <span style={{color:earningsColor(earnings[r.ticker]),fontWeight:600}}>E:{fmtEarnings(earnings[r.ticker])}</span>}
                               <a href={tvUrl(r.ticker,active?.exchange??"")} target="_blank" rel="noopener noreferrer"
                                 className="text-[10px] px-1 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-400 transition-colors whitespace-nowrap"
