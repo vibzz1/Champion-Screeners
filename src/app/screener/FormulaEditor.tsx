@@ -120,6 +120,9 @@ export function FormulaEditor({
             <div><span className="text-blue-600">price &gt; ema(20|50)</span> · <span className="text-blue-600">ema(20) &gt; ema(50)</span></div>
             <div><span className="text-blue-600">price &gt; bb_upper</span> · <span className="text-blue-600">price &lt; bb_lower</span> · <span className="text-blue-600">price near bb_upper</span></div>
             <div><span className="text-blue-600">near_52h &lt; 5</span> · <span className="text-blue-600">near_52l &lt; 20</span> · <span className="text-blue-600">new_52w_high</span></div>
+            <div><span className="text-blue-600">offh_50 &lt; 15</span> <span className="text-gray-400">= within 15% of 50-bar high</span> · <span className="text-blue-600">pgo(20) &lt; 20</span> <span className="text-gray-400">= ≤20% gain over 20 bars</span></div>
+            <div><span className="text-blue-600">range_contraction &lt; 0.85</span> <span className="text-gray-400">= candles tightening (VCP)</span></div>
+            <div><span className="text-blue-600">vol_contraction &lt; 0.85</span> <span className="text-gray-400">= volume drying up (VCP base)</span></div>
             <div><span className="text-blue-600">change &gt; 2</span> · <span className="text-blue-600">change &lt; -2</span> · <span className="text-blue-600">volume &gt; 1000000</span></div>
             <div><span className="text-blue-600">price &gt; 100</span> · <span className="text-blue-600">price &lt; 500</span></div>
             <div className="text-gray-400 text-[10px] not-italic font-sans mt-2 mb-1 font-semibold uppercase tracking-wide">── MIO formula syntax (paste directly) ──</div>

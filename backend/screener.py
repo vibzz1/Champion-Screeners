@@ -599,6 +599,8 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
       new_52w_high                       → new_52w_high: True
       near_52h < 5                       → near_52w_high_pct: 5
       near_52l < 20                      → near_52w_low_pct: 20
+      range_contraction < 0.85           → range_contraction_max: 0.85  (VCP candle tightening)
+      vol_contraction < 0.85             → vol_contraction_max: 0.85    (VCP volume dry-up)
     """
     import re as _re
     if not formula or not formula.strip():
@@ -721,6 +723,20 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
         if not matched:
             if _re.search(r'new_?52w?_?high', p):
                 result['new_52w_high'] = True; matched = True
+
+            # range_contraction < X  — VCP candle/volatility tightening
+            #   (mean range of last 10 bars vs last 50 bars; < 1 = contracting)
+            elif (m := _re.match(r'range_?contraction\s*([<>]=?)\s*([\d.]+)', p)):
+                op, val = m.group(1), float(m.group(2))
+                result['range_contraction_max' if '<' in op else 'range_contraction_min'] = val
+                matched = True
+
+            # vol_contraction < X  — VCP volume dry-up
+            #   (mean volume of last 10 bars vs last 50 bars; < 1 = drying up)
+            elif (m := _re.match(r'vol_?contraction\s*([<>]=?)\s*([\d.]+)', p)):
+                op, val = m.group(1), float(m.group(2))
+                result['vol_contraction_max' if '<' in op else 'vol_contraction_min'] = val
+                matched = True
 
             # RSI
             elif (m := _re.match(r'rsi\s*([><=!]+)\s*(-?[\d.]+)', p)):
@@ -1991,6 +2007,26 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         atr20_mean  = float(tr.rolling(20).mean().iloc[-1])
         atr_ratio   = _sf(atr1_true / atr20_mean, 4) if atr20_mean and atr20_mean > 0 else None
 
+        # ── VCP contraction metrics (for pre-breakout shortlist scans) ────────
+        # range_contraction = mean true range of last 10 bars / last 50 bars.
+        #   < 1.0 ⇒ candles are tightening (volatility contraction → base forming).
+        # vol_contraction   = mean volume of last 10 bars / last 50 bars.
+        #   < 1.0 ⇒ volume drying up (quiet accumulation, classic VCP base).
+        # Both fall back to None (→ filter rejects) when history < 50 bars.
+        if len(tr) >= 50:
+            _tr_recent = float(tr.tail(10).mean())
+            _tr_long   = float(tr.tail(50).mean())
+            range_contraction = _sf(_tr_recent / _tr_long, 3) if _tr_long and _tr_long > 0 else None
+        else:
+            range_contraction = None
+        _vol_clean = vol.dropna()
+        if len(_vol_clean) >= 50:
+            _v_recent = float(_vol_clean.tail(10).mean())
+            _v_long   = float(_vol_clean.tail(50).mean())
+            vol_contraction = _sf(_v_recent / _v_long, 3) if _v_long and _v_long > 0 else None
+        else:
+            vol_contraction = None
+
         # Candle position: where did price close in today's range (0=at low, 1=at high)
         hi_last   = float(high.iloc[-1])
         lo_last   = float(low.iloc[-1])
@@ -2153,6 +2189,8 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             "sma20":  sma20,   "sma50":  sma50,  "sma100": sma100,  "sma200": sma200,
             "ema20":  ema20,   "ema50":  ema50,
             "atr_ratio":         atr_ratio,
+            "range_contraction": range_contraction,
+            "vol_contraction":   vol_contraction,
             "candle_pos":        candle_pos,
             "dollar_vol_20":     dollar_vol_20,
             "dollar_vol_50":     dollar_vol_50,
@@ -2322,6 +2360,22 @@ def apply_filters(ind: Dict, f: Dict) -> bool:
     if f.get("atr_ratio_min") is not None:
         ar = ind.get("atr_ratio")
         if ar is None or ar < f["atr_ratio_min"]: return False
+
+    # VCP range contraction: recent ATR / longer ATR (candle tightening)
+    if f.get("range_contraction_max") is not None:
+        rc = ind.get("range_contraction")
+        if rc is None or rc > f["range_contraction_max"]: return False
+    if f.get("range_contraction_min") is not None:
+        rc = ind.get("range_contraction")
+        if rc is None or rc < f["range_contraction_min"]: return False
+
+    # VCP volume contraction: recent volume / longer volume (dry-up)
+    if f.get("vol_contraction_max") is not None:
+        vc = ind.get("vol_contraction")
+        if vc is None or vc > f["vol_contraction_max"]: return False
+    if f.get("vol_contraction_min") is not None:
+        vc = ind.get("vol_contraction")
+        if vc is None or vc < f["vol_contraction_min"]: return False
 
     # Candle position: where did price close in today's range (0=bottom, 1=top)
     if f.get("candle_pos_min") is not None:
