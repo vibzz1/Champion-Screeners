@@ -1,6 +1,6 @@
 import type { SavedScreener } from "./types";
 
-export const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "XETRA"];
+export const EXCHANGES = ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "TWSE", "SSE", "XETRA"];
 export const PAGE_SIZES = [20, 50, 100];
 
 export const CHIPS = [
@@ -31,4 +31,6 @@ export const DEFAULTS: SavedScreener[] = [
   { id: "d8", name: "Korea Setup Scan (KOSPI)",  exchange: "KOSPI",  formula: "advol(20) > 5000 and advol(50) > 5000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d10", name: "Korea Setup Scan (KOSDAQ)", exchange: "KOSDAQ", formula: "advol(20) > 2000 and advol(50) > 2000 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
   { id: "d9", name: "Germany Setup Scan",    exchange: "XETRA",  formula: "advol(20) > 10 and advol(50) > 10 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d12", name: "Taiwan Setup Scan",    exchange: "TWSE",  formula: "advol(20) > 100 and advol(50) > 100 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
+  { id: "d13", name: "China Setup Scan",     exchange: "SSE",   formula: "advol(20) > 75 and advol(50) > 75 and !(sma(20) < sma(50)) and !(sma(20) trend_dn 10) and !(price < sma(50) and sma(50) trend_dn 20) and price > sma(10) and price > sma(20) and sma(10) > sma(20) and price > c[1] and atr(1) > atr(20) * 0.6 and price > low + ((high - low) * 0.4)" },
 ];

@@ -42,6 +42,18 @@ def _prewarm_intraday_background():
     except Exception as e:
         print(f"[prewarm] intraday background error: {e}")
 
+# International daily caches are warmed out-of-band so the very first user scan
+# never downloads a large universe inside the request (the timeout that forced
+# Japan to be trimmed). Each call is a no-op when today's cache already exists.
+_INTL_EXCHANGES = ["TSE", "KOSPI", "KOSDAQ", "TWSE", "SSE", "XETRA", "SP500"]
+
+def _prewarm_international_background():
+    """Warm daily OHLCV for all international markets — daemon thread, off-peak."""
+    try:
+        prewarm_ohlcv_cache(_INTL_EXCHANGES)
+    except Exception as e:
+        print(f"[prewarm] international background error: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     # Cap FastAPI/anyio's own thread pool — prevents it from growing to 40+ threads.
@@ -75,6 +87,8 @@ async def startup_event():
     threading.Thread(target=_prewarm_daily_background, daemon=True).start()
     # 1b. Also kick off intraday pre-warm on startup (no-op if cache fresh)
     threading.Thread(target=_prewarm_intraday_background, daemon=True).start()
+    # 1c. Warm international universes out-of-band (TSE/KOSPI/KOSDAQ/TWSE/SSE/XETRA/SP500)
+    threading.Thread(target=_prewarm_international_background, daemon=True).start()
 
     # 2. Schedule daily pre-warm jobs Mon–Fri
     try:
@@ -95,6 +109,13 @@ async def startup_event():
             id="nse_prewarm_intraday",
             replace_existing=True,
         )
+        # International daily caches: 00:30 UTC — before all Asian opens, off-peak.
+        scheduler.add_job(
+            _prewarm_international_background,
+            CronTrigger(hour=0, minute=30, day_of_week="mon-fri", timezone=pytz.utc),
+            id="intl_prewarm_daily",
+            replace_existing=True,
+        )
         # Bhavcopy nightly update: 19:00 IST = 13:30 UTC  (NSE publishes ~6:30pm)
         def _bhav_update_job():
             try:
@@ -112,7 +133,7 @@ async def startup_event():
             replace_existing=True,
         )
         scheduler.start()
-        print("[prewarm] Scheduler started — daily@08:00IST, intraday@10:45IST, bhavcopy@19:00IST (Mon–Fri)")
+        print("[prewarm] Scheduler started — daily@08:00IST, intraday@10:45IST, intl@00:30UTC, bhavcopy@19:00IST (Mon–Fri)")
     except Exception as e:
         print(f"[prewarm] Scheduler setup failed: {e}")
 

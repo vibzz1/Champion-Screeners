@@ -498,6 +498,8 @@ _JAPAN_TICKERS  = _load_tickers("japan_tickers.txt",   ".T")  # Tokyo Stock Exch
 _KOREA_TICKERS  = _load_tickers("korea_tickers.txt",   ".KS") # KOSPI
 _KOSDAQ_TICKERS = _load_tickers("kosdaq_tickers.txt",  ".KQ") # KOSDAQ
 _GERMANY_TICKERS= _load_tickers("germany_tickers.txt", ".DE") # XETRA Frankfurt
+_TAIWAN_TICKERS = _load_tickers("taiwan_tickers.txt",  ".TW") # Taiwan Stock Exchange
+_CHINA_TICKERS  = _load_tickers("china_tickers.txt",   "")    # China A-shares — symbols carry .SS/.SZ
 
 UNIVERSES = {
     "NSE":     _NSE_TICKERS,
@@ -517,6 +519,8 @@ UNIVERSES = {
     "KOSPI":   _KOREA_TICKERS,   # Korea Stock Exchange (main board)
     "KOSDAQ":  _KOSDAQ_TICKERS,  # Korea KOSDAQ (tech/growth board)
     "XETRA":   _GERMANY_TICKERS, # Frankfurt / Xetra
+    "TWSE":    _TAIWAN_TICKERS,  # Taiwan Stock Exchange
+    "SSE":     _CHINA_TICKERS,   # China A-shares (Shanghai + Shenzhen)
 }
 
 # ── Preset Screens ─────────────────────────────────────────────────────────
@@ -2177,7 +2181,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             ohlcv = []
             sparkline = []
 
-        display = ticker.replace(".NS", "").replace(".BO", "")
+        display = _re_module.sub(r'\.(NS|BO|T|KS|KQ|DE|TW|SS|SZ)$', '', ticker)
         return {
             "symbol":            display,
             "ticker":            ticker,

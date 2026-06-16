@@ -55,6 +55,16 @@ export function fmtCap(cap: number | null, exchange: string) {
     if (cap >= 1000)    return `€${(cap / 1000).toFixed(0)}B`;
     return `€${cap}M`;
   }
+  if (exchange === "TWSE") {
+    if (cap >= 1000000) return `NT$${(cap / 1000000).toFixed(1)}T`;
+    if (cap >= 1000)    return `NT$${(cap / 1000).toFixed(0)}B`;
+    return `NT$${cap}M`;
+  }
+  if (exchange === "SSE") {
+    if (cap >= 1000000) return `¥${(cap / 1000000).toFixed(1)}T`;
+    if (cap >= 1000)    return `¥${(cap / 1000).toFixed(0)}B`;
+    return `¥${cap}M`;
+  }
   if (cap >= 1000000) return `$${(cap / 1000000).toFixed(1)}T`;
   if (cap >= 1000)    return `$${(cap / 1000).toFixed(0)}B`;
   return `$${cap}M`;
@@ -75,7 +85,9 @@ export function tvUrl(ticker: string, exchange?: string): string {
     ticker.endsWith(".T")  ? "TSE"    :
     ticker.endsWith(".KS") ? "KOSPI"  :
     ticker.endsWith(".KQ") ? "KOSDAQ" :
-    ticker.endsWith(".DE") ? "XETRA"  : ""
+    ticker.endsWith(".DE") ? "XETRA"  :
+    ticker.endsWith(".TW") ? "TWSE"   :
+    (ticker.endsWith(".SS") || ticker.endsWith(".SZ")) ? "SSE" : ""
   );
   let sym: string;
   if      (ex === "NSE")    sym = `NSE:${ticker.replace(".NS", "").replace(".BO", "")}`;
@@ -84,7 +96,12 @@ export function tvUrl(ticker: string, exchange?: string): string {
   else if (ex === "KOSPI")  sym = `KRX:${ticker.replace(".KS", "")}`;
   else if (ex === "KOSDAQ") sym = `KOSDAQ:${ticker.replace(".KQ", "")}`;
   else if (ex === "XETRA")  sym = `XETR:${ticker.replace(".DE", "")}`;
-  else sym = ticker.replace(/\.(NS|BO|T|KS|KQ|DE)$/, ""); // US: no prefix
+  else if (ex === "TWSE")   sym = `TWSE:${ticker.replace(".TW", "")}`;
+  // China: Shanghai (.SS) → SSE prefix, Shenzhen (.SZ) → SZSE prefix
+  else if (ex === "SSE")    sym = ticker.endsWith(".SZ")
+                                  ? `SZSE:${ticker.replace(".SZ", "")}`
+                                  : `SSE:${ticker.replace(".SS", "")}`;
+  else sym = ticker.replace(/\.(NS|BO|T|KS|KQ|DE|TW|SS|SZ)$/, ""); // US: no prefix
   return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`;
 }
 
