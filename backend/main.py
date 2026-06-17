@@ -47,9 +47,19 @@ def _prewarm_intraday_background():
 # Japan to be trimmed). Each call is a no-op when today's cache already exists.
 _INTL_EXCHANGES = ["TSE", "KOSPI", "KOSDAQ", "TWSE", "SSE", "XETRA", "SP500"]
 
-def _prewarm_international_background():
-    """Warm daily OHLCV for all international markets — daemon thread, off-peak."""
+def _prewarm_international_background(force: bool = False):
+    """Warm daily OHLCV for all international markets — daemon thread, off-peak.
+
+    The China universe alone is ~3,600 tickers; downloading the intl markets
+    hammers yfinance. If a Railway restart fires this mid-session it would starve
+    NSE's own intraday top-up (also yfinance-backed), so today's NSE candle stops
+    populating. Skip on startup while NSE is open; the scheduled 00:30 UTC run
+    (pre-market) and lazy on-first-scan build still cover the caches."""
     try:
+        from screener import _is_market_open
+        if not force and _is_market_open("NSE"):
+            print("[prewarm] intl: NSE open — deferring (protect NSE live-data path)")
+            return
         prewarm_ohlcv_cache(_INTL_EXCHANGES)
     except Exception as e:
         print(f"[prewarm] international background error: {e}")

@@ -1702,6 +1702,26 @@ def _inject_today_from_intraday(exchange: str, data: Dict[str, pd.DataFrame], to
             df_today = df_75[today_mask]
             if df_today.empty:
                 continue
+            # Split existing history into pre-today / today rows.
+            try:
+                hist_norm = df_hist.index.normalize().tz_localize(None)
+            except TypeError:
+                hist_norm = df_hist.index.normalize()
+            hist_today_mask = hist_norm >= ts_today
+            pre_today = df_hist[~hist_today_mask]
+            # Staleness guard: if the symbol's last real daily bar is >7 calendar
+            # days old, it's suspended/renamed/delisted. Injecting today's intraday
+            # bar would fabricate a floating candle (month-long chart gap) AND a
+            # garbage change% measured against a month-old close — which sorts the
+            # broken ticker to the very top of the scan. Skip it.
+            if not pre_today.empty:
+                last_real = hist_norm[~hist_today_mask][-1]
+                if (ts_today - last_real).days > 7:
+                    # Stale symbol — strip any fabricated today row that a prior
+                    # run may have persisted, then skip (no floating candle).
+                    if hist_today_mask.any():
+                        data[ticker] = pre_today
+                    continue
             today_row = pd.DataFrame(
                 [[float(df_today["Open"].iloc[0]),
                   float(df_today["High"].max()),
@@ -1711,12 +1731,7 @@ def _inject_today_from_intraday(exchange: str, data: Dict[str, pd.DataFrame], to
                 columns=["Open", "High", "Low", "Close", "Volume"],
                 index=[ts_today],
             )
-            # Drop any stale today row already in hist before appending
-            try:
-                mask = df_hist.index.normalize().tz_localize(None) >= ts_today
-            except TypeError:
-                mask = df_hist.index.normalize() >= ts_today
-            data[ticker] = pd.concat([df_hist[~mask], today_row])
+            data[ticker] = pd.concat([pre_today, today_row])
             filled += 1
         return filled
     except Exception as _e:
