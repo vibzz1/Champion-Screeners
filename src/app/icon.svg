@@ -1,11 +1,8 @@
 <svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-  <!-- Market InOut — navy squircle + ascending candlesticks (orange → green) -->
-  <rect x="8" y="8" width="240" height="240" rx="52" fill="#0f172a"/>
-  <!-- left candle: orange (brand accent, echoes the "O") -->
-  <rect x="78" y="104" width="14" height="14" rx="7" fill="#f59e0b" opacity="0"/>
-  <line x1="91" y1="92"  x2="91" y2="196" stroke="#f59e0b" stroke-width="12" stroke-linecap="round"/>
-  <rect x="71" y="120" width="40" height="58" rx="8" fill="#f59e0b"/>
-  <!-- right candle: green, taller/higher (uptrend) -->
-  <line x1="167" y1="56" x2="167" y2="172" stroke="#22c55e" stroke-width="12" stroke-linecap="round"/>
-  <rect x="147" y="78" width="40" height="74" rx="8" fill="#22c55e"/>
+  <!-- Market InOut — navy squircle + bold ascending bars (uptrend) -->
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="#0f172a"/>
+  <!-- three ascending bars, filling the icon; tallest in brand orange -->
+  <rect x="40"  y="150" width="52" height="74"  rx="12" fill="#22c55e"/>
+  <rect x="102" y="108" width="52" height="116" rx="12" fill="#22c55e"/>
+  <rect x="164" y="58"  width="52" height="166" rx="12" fill="#f59e0b"/>
 </svg>
