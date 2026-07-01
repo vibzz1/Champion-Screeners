@@ -116,6 +116,24 @@ def _parse_bhav_csv(text: str, d: datetime.date) -> Optional[pd.DataFrame]:
         df = pd.read_csv(io.StringIO(text))
         df.columns = df.columns.str.strip()
 
+        # Validate the file's internal trade date matches the requested date.
+        # NSE sometimes serves the PREVIOUS day's file for a new date's URL
+        # (holidays, or before the day's file is regenerated). Stamping the
+        # requested date onto stale content silently duplicates the prior day
+        # for every ticker. DATE1 (e.g. "25-Jun-2026") is the ground truth.
+        date_col = next((c for c in df.columns if c.upper() == "DATE1"), None)
+        if date_col is not None and len(df):
+            try:
+                internal = pd.to_datetime(
+                    str(df[date_col].iloc[0]).strip(), format="%d-%b-%Y"
+                ).date()
+                if internal != d:
+                    log.warning(f"[bhavcopy] {d}: file DATE1={internal} != requested "
+                                f"{d} — rejecting stale/duplicate file")
+                    return None
+            except Exception as _e:
+                log.warning(f"[bhavcopy] {d}: DATE1 parse failed ({_e}) — proceeding")
+
         # Keep EQ series (equity) only
         series_col = next((c for c in df.columns if c.upper() == "SERIES"), None)
         if series_col:
@@ -218,6 +236,31 @@ def download_and_store(d: datetime.date) -> bool:
         return False   # holiday / weekend / future date
     store_bhavcopy(df, d)
     return True
+
+
+def purge_duplicate_dates() -> dict:
+    """Remove any stored date whose bars are identical to the previous stored
+    date — a stale/duplicate Bhavcopy file NSE served under a new date's URL
+    (before the DATE1 validation existed). Keeps the earlier (real) date.
+    Returns {"removed": [...], "checked": n}."""
+    removed = []
+    with _get_conn() as c:
+        dates = [r[0] for r in c.execute(
+            "SELECT DISTINCT date FROM ohlcv ORDER BY date").fetchall()]
+        prev_rows = None
+        for d in dates:
+            rows = c.execute(
+                "SELECT symbol,open,high,low,close,volume FROM ohlcv "
+                "WHERE date=? ORDER BY symbol", (d,)).fetchall()
+            if prev_rows is not None and len(rows) > 100 and rows == prev_rows:
+                c.execute("DELETE FROM ohlcv WHERE date=?", (d,))
+                c.execute("DELETE FROM fetched_dates WHERE date=?", (d,))
+                removed.append(d)
+                # keep prev_rows as the real prior date for the next comparison
+            else:
+                prev_rows = rows
+        c.commit()
+    return {"removed": removed, "checked": len(dates)}
 
 
 # ── Backfill ───────────────────────────────────────────────────────────────────

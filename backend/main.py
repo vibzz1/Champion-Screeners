@@ -334,6 +334,15 @@ def intraday_status():
 
     return result
 
+@app.post("/api/bhavcopy/dedup")
+def bhavcopy_dedup():
+    """Remove stale/duplicate Bhavcopy dates (NSE served a prior day's file for
+    a new date's URL). Also flushes the in-memory Bhavcopy cache."""
+    import nse_bhavcopy
+    res = nse_bhavcopy.purge_duplicate_dates()
+    nse_bhavcopy.invalidate_cache()
+    return res
+
 @app.post("/api/cache/clear")
 def clear_ohlcv_cache(exchange: str = None):
     """Delete OHLCV cache files so the next scan triggers a fresh download.
