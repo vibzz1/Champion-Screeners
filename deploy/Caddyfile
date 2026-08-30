@@ -1,0 +1,18 @@
+# Single-box: Caddy terminates TLS (auto Let's Encrypt) and splits traffic.
+#   /api/*  -> FastAPI backend (uvicorn :8000)
+#   /docs   -> FastAPI docs (handy for debugging)
+#   else    -> Next.js frontend (next start :3000)
+# setup.sh substitutes the real domain for {$DOMAIN}.
+{$DOMAIN} {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /docs* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

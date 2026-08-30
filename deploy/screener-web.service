@@ -1,0 +1,16 @@
+[Unit]
+Description=Screener Next.js frontend (next start)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=screener
+WorkingDirectory=/opt/screener/app
+Environment=NODE_ENV=production
+ExecStart=/opt/screener/app/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=Screener FastAPI backend (uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=screener
+WorkingDirectory=/opt/screener/app/backend
+EnvironmentFile=/etc/screener.env
+ExecStart=/opt/screener/app/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --log-level warning
+Restart=always
+RestartSec=5
+# memory guard: restart if it balloons past ~2.5GB (China scan peaks ~2GB)
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
