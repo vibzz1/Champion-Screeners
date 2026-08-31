@@ -1,19 +1,29 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # probe.sh — RUN THIS FIRST on a fresh VPS, BEFORE migrating.
-# Validates that this server's IP can actually reach the 3 data sources the app
-# depends on. Budget-host IPs (Hetzner/Contabo/RackNerd) are sometimes rate-
-# limited by Yahoo/NSE — this is a ~2-minute, ~₹0 go/no-go check.
-#
-# Usage:  bash probe.sh
-# PASS  → safe to run setup.sh
-# FAIL  → destroy the box, try another host
+# Validates that this server's IP can actually reach the data sources the app
+# depends on. Budget-host IPs are sometimes rate-limited by Yahoo/NSE — this is
+# a ~2-minute, ~₹0 go/no-go check.  Run as root:
+#   curl -fsSL https://raw.githubusercontent.com/vibzz1/champion-screeners/main/deploy/probe.sh | bash
 # ─────────────────────────────────────────────────────────────────────────────
 set -u
 echo "== screener host probe =="
 
-# 1) NSE Bhavcopy reachability (needs a real trading weekday; tries last 5 days)
-echo "--- [1/3] NSE Bhavcopy ---"
+# ── bootstrap: fresh Ubuntu has no pip, and 24.04 blocks system pip (PEP668),
+#    so we use an isolated venv. ──────────────────────────────────────────────
+export DEBIAN_FRONTEND=noninteractive
+if ! dpkg -s python3-venv >/dev/null 2>&1; then
+  echo "  (installing python3-venv + curl …)"
+  apt-get update -qq && apt-get install -yqq python3-venv curl >/dev/null
+fi
+PV=/tmp/probe-venv
+[ -x "$PV/bin/python" ] || python3 -m venv "$PV"
+"$PV/bin/pip" install -q --upgrade pip >/dev/null
+"$PV/bin/pip" install -q yfinance >/dev/null
+PY="$PV/bin/python"
+
+# ── [1/2] NSE Bhavcopy reachability (tries last 5 weekdays) ──────────────────
+echo "--- [1/2] NSE Bhavcopy ---"
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 nse_ok=0
 for i in 1 2 3 4 5; do
@@ -23,23 +33,16 @@ for i in 1 2 3 4 5; do
     "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_${d}.csv")
   sz=$(wc -c </tmp/_bhav.csv 2>/dev/null || echo 0)
   if [ "$code" = "200" ] && [ "$sz" -gt 50000 ]; then
-    echo "  OK  $d -> HTTP 200, ${sz} bytes"; nse_ok=1; break
+    echo "  PASS  $d -> HTTP 200, ${sz} bytes"; nse_ok=1; break
   fi
 done
-[ "$nse_ok" = 1 ] && echo "  PASS" || echo "  FAIL — NSE archive blocked or unreachable from this IP"
+[ "$nse_ok" = 1 ] || echo "  FAIL — NSE archive blocked/unreachable from this IP"
 
-# 2) yfinance bulk resolution rate (the real throttling tell)
-echo "--- [2/3] yfinance bulk (300 NSE tickers) ---"
-python3 - <<'PY'
-import sys, subprocess
-try:
-    import yfinance  # noqa
-except Exception:
-    subprocess.run([sys.executable,"-m","pip","install","-q","yfinance"], check=False)
-import warnings, yfinance as yf
+# ── [2/2] yfinance bulk resolution (the real throttling tell) ───────────────
+echo "--- [2/2] yfinance bulk (300 NSE tickers) ---"
+"$PY" - <<'PYEOF'
+import warnings, urllib.request, yfinance as yf
 warnings.filterwarnings("ignore")
-import urllib.request
-# pull the repo's NSE list (first 300) or fall back to a small built-in set
 try:
     txt=urllib.request.urlopen("https://raw.githubusercontent.com/vibzz1/champion-screeners/main/backend/data/nse_tickers.txt",timeout=20).read().decode()
     syms=[l.strip()+".NS" for l in txt.splitlines() if l.strip() and not l.startswith("#")][:300]
@@ -53,28 +56,7 @@ for s in syms:
     except Exception: pass
 pct=round(ok/len(syms)*100)
 print(f"  resolved {ok}/{len(syms)} = {pct}%")
-print("  PASS" if pct>=90 else "  FAIL — yfinance is throttling this IP (<90% resolved)")
-PY
+print("  PASS — IP is clean" if pct>=90 else "  FAIL — yfinance throttling this IP (<90%)")
+PYEOF
 
-# 3) Angel One SmartAPI login (uses env vars if set, else the app's defaults)
-echo "--- [3/3] Angel One SmartAPI login ---"
-python3 - <<'PY'
-import os, sys, subprocess
-for pkg in ("pyotp","smartapi-python","logzero","requests"):
-    try: __import__(pkg.replace("-","_").replace("smartapi_python","SmartApi"))
-    except Exception: subprocess.run([sys.executable,"-m","pip","install","-q",pkg],check=False)
-try:
-    from SmartApi import SmartConnect
-    import pyotp
-    cid=os.environ.get("ANGEL_CLIENT_ID","V119180")
-    pin=os.environ.get("ANGEL_PIN","1235")
-    tot=os.environ.get("ANGEL_TOTP_SECRET","ANOTHBL5HZBJ7YBP6C2SFWEL3U")
-    key=os.environ.get("ANGEL_API_KEY","AgqDUsEv")
-    s=SmartConnect(api_key=key)
-    r=s.generateSession(cid,pin,pyotp.TOTP(tot).now())
-    print("  PASS — login OK" if r.get("status") else f"  FAIL — {r.get('message')}")
-except Exception as e:
-    print(f"  WARN — could not test ({type(e).__name__}: {e}). Angel is a fallback for BSE only; NSE runs on Bhavcopy.")
-PY
-
-echo "== done. All three PASS (or #3 WARN) → run setup.sh =="
+echo "== done. NSE PASS + yfinance >=90% -> run setup.sh =="
