@@ -14,8 +14,16 @@ set -euo pipefail
 # curl|bash can hand us a stripped PATH → apt-get/systemctl "command not found"
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
-DOMAIN="${1:?Usage: setup.sh <domain> [git_ref]}"
+DOMAIN="${1:?Usage: setup.sh <domain-or-IP> [git_ref]}"
 GIT_REF="${2:-main}"
+
+# IP arg → plain-HTTP mode on :80 (no cert). Domain arg → auto-HTTPS.
+if echo "$DOMAIN" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+  MODE=ip;     BASE_URL="http://$DOMAIN"
+else
+  MODE=domain; BASE_URL="https://$DOMAIN"
+fi
+echo "==> mode=$MODE  base=$BASE_URL"
 REPO="https://github.com/vibzz1/champion-screeners.git"
 APP=/opt/screener/app
 DATA=/opt/screener/data
@@ -77,7 +85,7 @@ sudo -u "$USER" "$APP/backend/venv/bin/pip" install -q -r "$APP/backend/requirem
 # ── frontend (build with same-origin API base) ─────────────────────────────
 cd "$APP"
 sudo -u "$USER" npm ci --no-audit --no-fund
-sudo -u "$USER" env NEXT_PUBLIC_API_URL="https://$DOMAIN" npm run build
+sudo -u "$USER" env NEXT_PUBLIC_API_URL="$BASE_URL" npm run build
 
 # ── systemd units ───────────────────────────────────────────────────────────
 cp "$APP/deploy/screener-api.service" /etc/systemd/system/
@@ -86,7 +94,21 @@ systemctl daemon-reload
 systemctl enable --now screener-api screener-web
 
 # ── Caddy ───────────────────────────────────────────────────────────────────
-sed "s/{\$DOMAIN}/$DOMAIN/g" "$APP/deploy/Caddyfile" >/etc/caddy/Caddyfile
+if [ "$MODE" = ip ]; then
+  cat >/etc/caddy/Caddyfile <<'EOF'
+{
+	auto_https off
+}
+:80 {
+	encode zstd gzip
+	handle /api/* { reverse_proxy 127.0.0.1:8000 }
+	handle /docs* { reverse_proxy 127.0.0.1:8000 }
+	handle { reverse_proxy 127.0.0.1:3000 }
+}
+EOF
+else
+  sed "s/{\$DOMAIN}/$DOMAIN/g" "$APP/deploy/Caddyfile" >/etc/caddy/Caddyfile
+fi
 systemctl reload caddy || systemctl restart caddy
 
 # ── nightly off-box-ready backup + firewall ─────────────────────────────────
@@ -101,6 +123,6 @@ yes | ufw enable  >/dev/null 2>&1 || true
 echo "==> DONE."
 echo "    Backend : systemctl status screener-api"
 echo "    Frontend: systemctl status screener-web"
-echo "    Site    : https://$DOMAIN   (after DNS points here + cert issues, ~30s)"
+echo "    Site    : $BASE_URL"
 echo "    NEXT: (1) rsync your local backend/cache -> $DATA to skip the 400-day NSE backfill"
 echo "          (2) curl -X POST https://$DOMAIN/api/bhavcopy/dedup   # clear the stale dup candle"
