@@ -101,9 +101,15 @@ if [ "$MODE" = ip ]; then
 }
 :80 {
 	encode zstd gzip
-	handle /api/* { reverse_proxy 127.0.0.1:8000 }
-	handle /docs* { reverse_proxy 127.0.0.1:8000 }
-	handle { reverse_proxy 127.0.0.1:3000 }
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /docs* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
 }
 EOF
 else
