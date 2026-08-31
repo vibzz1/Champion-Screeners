@@ -67,8 +67,26 @@ journalctl -u screener-api -f                       # backend logs
 git -C /opt/screener/app pull && systemctl restart screener-api screener-web   # deploy (or re-run setup.sh)
 ls /opt/screener/backups                            # nightly bhavcopy.db snapshots (7 kept)
 ```
-Off-box backup: edit `/usr/local/bin/screener-backup`, enable the `rclone` line
-to a Cloudflare R2 bucket (free) — a free/cheap VPS is disposable, the DB isn't.
+### Off-box backup → Cloudflare R2 (free 10 GB) — do this once on the VPS
+A cheap VPS is disposable; the 400-day `bhavcopy.db` is not. The nightly cron
+already pushes to R2 **automatically** the moment an rclone remote named `backup`
+exists — you just configure it once:
+
+1. Cloudflare dashboard → **R2** → create bucket `screener-backups` → **Manage R2
+   API Tokens** → create token → copy the **Access Key ID**, **Secret**, and your
+   **Account ID** (the S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`).
+2. On the VPS:
+   ```bash
+   rclone config
+   # n (new) → name: backup → storage: s3 → provider: Cloudflare
+   # access_key_id / secret_access_key: paste from step 1
+   # endpoint: https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+   # leave region blank, accept defaults, q to quit
+   rclone mkdir backup:screener-backups
+   /usr/local/bin/screener-backup      # test — should print "backup ok (local + R2)"
+   ```
+That's it. Cron runs it nightly at 20:30; local keeps 7, R2 keeps 14 days.
+Restore: `rclone copy backup:screener-backups/bhavcopy_YYYYMMDD.db.gz .`
 
 ## Why one box (not two services)
 The frontend is a static client SPA that only calls `${NEXT_PUBLIC_API_URL}/api/*`.

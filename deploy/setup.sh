@@ -23,7 +23,7 @@ echo "==> Provisioning screener on $DOMAIN (ref $GIT_REF)"
 # ── packages ────────────────────────────────────────────────────────────────
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -yq git python3-venv python3-pip rsync ufw curl ca-certificates debian-keyring debian-archive-keyring apt-transport-https
+apt-get install -yq git python3-venv python3-pip rsync ufw curl ca-certificates debian-keyring debian-archive-keyring apt-transport-https sqlite3 rclone
 
 # Node 20 (Next 16 needs >=18.18)
 if ! node -v 2>/dev/null | grep -qE "v(20|22)"; then
