@@ -11,6 +11,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# curl|bash can hand us a stripped PATH → apt-get/systemctl "command not found"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+
 DOMAIN="${1:?Usage: setup.sh <domain> [git_ref]}"
 GIT_REF="${2:-main}"
 REPO="https://github.com/vibzz1/champion-screeners.git"
