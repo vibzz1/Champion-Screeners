@@ -54,6 +54,7 @@ id -u "$USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbi
 mkdir -p "$APP" "$DATA"
 
 # ── code ────────────────────────────────────────────────────────────────────
+git config --global --add safe.directory "$APP" 2>/dev/null || true
 if [ -d "$APP/.git" ]; then
   git -C "$APP" fetch --depth 1 origin "$GIT_REF" && git -C "$APP" reset --hard "origin/$GIT_REF"
 else
