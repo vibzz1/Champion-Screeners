@@ -86,6 +86,9 @@ sudo -u "$USER" "$APP/backend/venv/bin/pip" install -q -r "$APP/backend/requirem
 # ── frontend (build with same-origin API base) ─────────────────────────────
 cd "$APP"
 sudo -u "$USER" npm ci --no-audit --no-fund
+# clean build — a leftover .next from a prior/interrupted build serves HTML that
+# references chunk hashes no longer on disk → 500s → ChunkLoadError in the browser
+sudo -u "$USER" rm -rf "$APP/.next"
 sudo -u "$USER" env NEXT_PUBLIC_API_URL="$BASE_URL" npm run build
 
 # ── systemd units ───────────────────────────────────────────────────────────
