@@ -111,6 +111,21 @@ tbody tr:nth-child(even) {
   background: var(--mio-surface3);
 }
 
+/* ── Numeric columns: right-aligned so magnitudes line up on a clean edge ──
+   Applies to both the header (th) and cells (td), which each carry data-col.
+   Text columns (symbol, company, sector, cap badges…) stay left-aligned.     */
+[data-col="mktcap"],
+[data-col="price"],
+[data-col="chg"],
+[data-col="volume"],
+[data-col="rsi"],
+[data-col="sma20"],
+[data-col="sma50"],
+[data-col="sma200"],
+[data-col="h52"] {
+  text-align: right !important;
+}
+
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar              { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track        { background: transparent; }
