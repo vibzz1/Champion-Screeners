@@ -18,6 +18,7 @@ import pickle
 import datetime
 import os
 import json
+import hashlib
 import re as _re_module
 import concurrent.futures
 import yfinance as yf
@@ -1057,6 +1058,47 @@ _LAST_TOPUP: dict = {}
 import threading as _topup_threading
 _TOPUP_RUNNING: set = set()
 _TOPUP_RUNNING_LOCK = _topup_threading.Lock()
+
+# ── Computed-indicator cache ──────────────────────────────────────────────────
+# Once a day's EOD bars are final, compute_indicators() returns identical dicts
+# for every scan — only the formula's apply_filters() differs. Caching the
+# per-ticker indicator dicts keyed by (exchange, interval, data_date) means the
+# FIRST scan of the day builds them (~50s) and every later scan — even with a
+# DIFFERENT formula — reuses them and only re-runs the cheap filter (sub-second).
+# The cache is bypassed whenever live bars are in play (market hours / before the
+# Bhavcopy update) or for historical (as_of_date) scans, so results and liveness
+# are byte-identical to the un-cached path — this only removes repeated work.
+_IND_CACHE: dict = {}                    # key -> {ticker: ind_dict}
+_IND_CACHE_LOCK = _topup_threading.Lock()
+_IND_CACHE_MAX  = 6                       # keep a few exchange/date entries; ~4MB each
+
+def _ohlcv_signature(tickers: List[str], ohlcv_data: Dict[str, pd.DataFrame]) -> str:
+    """A cheap content fingerprint of the CURRENT last bar across the universe.
+
+    Today's bar is the intraday-synthesised bar (rewritten on every 75m/78m
+    topup) until Bhavcopy posts the official close, so "today is present" does
+    NOT mean the data is stable. Fingerprinting each sampled ticker's last
+    (date, close, volume) makes the fingerprint change the instant a topup or
+    Bhavcopy update moves any bar — so the indicator cache keyed on it stays
+    valid exactly as long as the underlying data is unchanged, and no longer.
+    Sampled across the universe (topups rewrite every ticker together, so a
+    spread sample detects any change) to keep the cost negligible (~60 reads).
+    """
+    n = len(tickers)
+    if n == 0:
+        return "empty"
+    step = max(1, n // 64)
+    parts = []
+    for t in tickers[::step]:
+        df = ohlcv_data.get(t)
+        if df is None or getattr(df, "empty", True):
+            parts.append(f"{t}~")
+            continue
+        try:
+            parts.append(f"{t}|{str(df.index[-1])[:10]}|{float(df['Close'].iloc[-1]):.4f}|{float(df['Volume'].iloc[-1]):.0f}")
+        except Exception:
+            parts.append(f"{t}!")
+    return hashlib.md5("#".join(parts).encode()).hexdigest()[:16]
 
 def _ohlcv_cache_path(exchange: str) -> Path:
     return OHLCV_CACHE_DIR / f"{exchange}_{datetime.date.today().isoformat()}.pkl"
@@ -2941,35 +2983,78 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             else:
                 live_bars = _fetch_live_us_bars(tickers)
 
-    # Stage 3: Compute indicators + filter — parallel across all tickers
+    # Stage 3: Compute indicators (cached once per EOD day) + apply this formula's filter.
     _SCREEN_PROGRESS.update({"phase": "filtering", "done": 0, "total": len(tickers), "exchange": exchange, "bar_min": 0})
-    _done_f = [0]
-    _lock_f = __import__("threading").Lock()
 
-    def _process(ticker: str):
+    # The indicator cache is keyed on a fingerprint of the CURRENT data. Today's bar
+    # is the intraday-synthesised bar and mutates on every 75m/78m topup (and again
+    # when Bhavcopy posts the official close), so the fingerprint changes the instant
+    # any bar moves — a cache entry is reused only while the underlying data is truly
+    # unchanged. Bypassed for historical (as_of_date) slices and whenever live bars
+    # are patched in per-scan (live prices vary per request); both would make a
+    # shared cache serve stale numbers.
+    _use_ind_cache = (not as_of_date) and (not live_bars)
+    _ind_key = (exchange, "1d", _ohlcv_signature(tickers, ohlcv_data)) if _use_ind_cache else None
+
+    all_inds = None
+    if _ind_key is not None:
         try:
-            df = ohlcv_data.get(ticker)
-            if df is None:
-                return None
-            if live_bars.get(ticker):
-                df = _patch_live_bar(df, live_bars[ticker])
-            # Skip heavy OHLCV build during filter scan — add it only for matches
-            ind = compute_indicators(ticker, df, as_of_date=as_of_date, include_ohlcv=False)
-            if ind and apply_filters(ind, filters):
-                return ticker  # return ticker so we can enrich with OHLCV after
-            return None
-        except Exception as e:
-            print(f"[screener] _process({ticker}): {type(e).__name__}: {e}")
-            return None
-        finally:
-            with _lock_f:
-                _done_f[0] += 1
-                _SCREEN_PROGRESS["done"] = _done_f[0]
+            with _IND_CACHE_LOCK:
+                cached = _IND_CACHE.get(_ind_key)
+            if cached is not None:
+                all_inds = cached
+                _SCREEN_PROGRESS["done"] = len(tickers)   # nothing to recompute
+        except Exception as _ce:
+            print(f"[screener] ind-cache read error: {_ce}")
+            all_inds = None
 
+    if all_inds is None:
+        # Compute every ticker's indicator dict in parallel (the ~50s cost, once/day).
+        _done_f = [0]
+        _lock_f = _topup_threading.Lock()
+
+        def _compute_one(ticker: str):
+            try:
+                df = ohlcv_data.get(ticker)
+                if df is None:
+                    return (ticker, None)
+                if live_bars.get(ticker):
+                    df = _patch_live_bar(df, live_bars[ticker])
+                # Skip heavy OHLCV build during filter scan — add it only for matches
+                ind = compute_indicators(ticker, df, as_of_date=as_of_date, include_ohlcv=False)
+                return (ticker, ind)
+            except Exception as e:
+                print(f"[screener] _compute_one({ticker}): {type(e).__name__}: {e}")
+                return (ticker, None)
+            finally:
+                with _lock_f:
+                    _done_f[0] += 1
+                    _SCREEN_PROGRESS["done"] = _done_f[0]
+
+        all_inds = {}
+        for _t, _ind in _EXECUTOR.map(_compute_one, tickers):
+            if _ind is not None:
+                all_inds[_t] = _ind
+
+        # Store for reuse by later scans of the same exchange/day (formula-independent).
+        if _ind_key is not None:
+            try:
+                with _IND_CACHE_LOCK:
+                    if _ind_key not in _IND_CACHE and len(_IND_CACHE) >= _IND_CACHE_MAX:
+                        _IND_CACHE.pop(next(iter(_IND_CACHE)), None)   # drop oldest entry
+                    _IND_CACHE[_ind_key] = all_inds
+            except Exception as _we:
+                print(f"[screener] ind-cache write error: {_we}")
+
+    # Apply this formula's filter over the (possibly cached) indicator dicts — microseconds.
+    # Per-ticker try/except keeps one bad row from failing the whole scan (matches old behaviour).
     matched_tickers = []
-    for result in _EXECUTOR.map(_process, tickers):
-        if result is not None:
-            matched_tickers.append(result)
+    for _t, _ind in all_inds.items():
+        try:
+            if apply_filters(_ind, filters):
+                matched_tickers.append(_t)
+        except Exception as e:
+            print(f"[screener] apply_filters({_t}): {type(e).__name__}: {e}")
 
     # Refresh today's bar for matched tickers with fresh yfinance 5-min data.
     # Condition: live scan (no as_of_date) AND bhavcopy/cache hasn't updated yet

@@ -10,7 +10,7 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP, _IND_CACHE, _IND_CACHE_LOCK
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -1004,4 +1004,8 @@ def clear_ohlcv_cache(exchange: Optional[str] = None):
     for f in OHLCV_CACHE_DIR.glob(pattern):
         f.unlink(missing_ok=True)
         removed.append(f.name)
-    return {"removed": removed}
+    # Also flush the in-memory computed-indicator cache so it can't serve dicts
+    # built from the OHLCV we just deleted (next scan recomputes from fresh data).
+    with _IND_CACHE_LOCK:
+        _IND_CACHE.clear()
+    return {"removed": removed, "ind_cache": "cleared"}
