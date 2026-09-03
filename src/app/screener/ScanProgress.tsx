@@ -28,13 +28,14 @@ export function ScanProgress({ progress, startMs, exchange }: {
     phase === "idle"           ? "Finalising…" :
                                  `Connecting to ${exchange} server…`;
 
-  const hint = isCache
-    ? "Cache hit — results arriving shortly"
-    : elapsed < 15
-    ? "First run downloads all tickers (~2–5 min). Subsequent runs use cache (<5 s)."
-    : elapsed < 90
-    ? "Still downloading — hang tight…"
-    : "Large universe. You can run a smaller scan while waiting.";
+  // Hint follows the ACTUAL phase, not elapsed time — so it never says
+  // "downloading" while the engine is really computing indicators.
+  const hint =
+    isCache                                       ? "Loading cached bars — results arriving shortly" :
+    phase === "downloading" || phase === "topup"  ? "Fetching the latest bars for every ticker…" :
+    phase === "filtering"                         ? "Computing indicators across the universe — the day's first scan builds the cache, repeat scans are near-instant." :
+    phase === "idle"                              ? "Finalising results…" :
+                                                    "Connecting to the data server…";
 
   return (
     <div className="flex-1 flex items-center justify-center px-6">

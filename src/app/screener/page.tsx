@@ -734,7 +734,7 @@ export default function ScreenerPage() {
         return (
           <td key={colId} className="px-2 py-1 tabular-nums" style={{ ...tdBase, color: volSurge ? "#ea580c" : "#4b5563" }}>
             {fmtVol(r.volume)}
-            {volSurge && r.avg_vol_20 && <span className="ml-0.5 text-[10px] font-bold text-orange-500">{(r.volume / r.avg_vol_20).toFixed(1)}×</span>}
+            {volSurge && r.avg_vol_20 && <span className="ml-1.5 text-[10px] font-bold text-orange-500">{(r.volume / r.avg_vol_20).toFixed(1)}×</span>}
           </td>
         );
       case "rsi":
@@ -987,7 +987,7 @@ export default function ScreenerPage() {
                         <td className="px-2 py-1 font-bold text-[13px] tabular-nums">{r.price?.toLocaleString()}</td>
                         <td className="px-2 py-1 font-semibold tabular-nums" style={{color:up?"var(--mio-up)":"var(--mio-dn)"}}>{up?"+":""}{r.change_pct}%</td>
                         <td className="px-2 py-1 tabular-nums" style={{color:volSurge?"#ea580c":"#4b5563"}}>
-                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-0.5 text-[10px] font-bold text-orange-500">{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
+                          {fmtVol(r.volume)}{volSurge&&r.avg_vol_20&&<span className="ml-1.5 text-[10px] font-bold text-orange-500">{(r.volume/r.avg_vol_20).toFixed(1)}×</span>}
                         </td>
                         <td className="px-2 py-1">
                           {r.rsi!=null
