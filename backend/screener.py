@@ -1041,6 +1041,17 @@ DOWNLOAD_BATCH          = 400   # tickers per yf.download() call (daily)
 DOWNLOAD_BATCH_INTRADAY = 50    # tickers per yf.download() call (15min) — smaller = less memory
 DOWNLOAD_WORKERS        = 2     # concurrent batch downloads — kept low for Railway thread limit
 
+# ── Intraday gap-fill (completeness) ──────────────────────────────────────────
+# The single-pass Angel+yfinance top-up silently drops rate-limited tickers, so a
+# real setup can vanish from the scan for the whole session (no EOD retry helps —
+# entries are same-day). After the main passes we retry the STILL-missing set,
+# Angel-first with backoff, over a few rounds under a hard time budget so it can
+# never hang the box. All fail-safe: worst case is today's (current) coverage.
+GAPFILL_ROUNDS    = 3     # bounded retry rounds for tickers still missing today's bar
+GAPFILL_BUDGET_S  = 45    # hard wall-clock budget for the whole gap-fill pass
+GAPFILL_YF_BATCH  = 40    # smaller yfinance batch during gap-fill = fewer silent drops
+GAPFILL_BACKOFF_S = 2     # pause between rounds so yfinance/Angel rate limits recover
+
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
     "phase":    "idle",   # idle | cache | downloading | filtering
@@ -1231,6 +1242,46 @@ def _load_intraday_cache_prev(exchange: str, bar_min: int) -> Optional[Dict[str,
     return None
 
 
+def _yf_today_bars(batch: List[str], exchange: str, bar_min: int) -> Dict[str, pd.DataFrame]:
+    """Fetch today's 15-min bars for a batch via yfinance and resample to bar_min.
+    Self-contained and never raises — used by the gap-fill retry (the main top-up
+    pass keeps its own inline fetch so this change can't affect the proven path)."""
+    out: Dict[str, pd.DataFrame] = {}
+    try:
+        raw = yf.download(batch, period="1d", interval="15m", auto_adjust=True,
+                          progress=False, group_by="ticker", threads=True)
+        if raw is None or raw.empty:
+            return out
+        for ticker in batch:
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                    lvl1 = (raw.columns.get_level_values(1).unique().tolist()
+                            if raw.columns.nlevels > 1 else [])
+                    if ticker in lvl0:
+                        df_15 = raw[ticker].copy()
+                    elif ticker in lvl1:
+                        df_15 = raw.xs(ticker, axis=1, level=1).copy()
+                    else:
+                        continue
+                    if isinstance(df_15.columns, pd.MultiIndex):
+                        df_15.columns = df_15.columns.get_level_values(-1)
+                else:
+                    df_15 = raw.copy()
+                want = ["Open", "High", "Low", "Close", "Volume"]
+                df_15 = df_15[[c for c in want if c in df_15.columns]].dropna(subset=["Close"])
+                if df_15.empty:
+                    continue
+                db = _resample_intraday(df_15, exchange, bar_min, min_bars=1)
+                if db is not None and not db.empty:
+                    out[ticker] = db
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return out
+
+
 def _topup_intraday(
     exchange: str,
     prev_data: Dict[str, pd.DataFrame],
@@ -1342,6 +1393,44 @@ def _topup_intraday(
         for bd in _EXECUTOR.map(_fetch_today_batch, enumerate(batches, 1)):
             today_bars.update(bd)
 
+    # ── Gap-fill: retry tickers still missing today's bar (bounded, fail-safe) ──
+    # Both passes drop rate-limited tickers silently. Retry just the missing set,
+    # Angel-first (reliable, and small enough to fit its rate budget), then
+    # small-batch yfinance — a few rounds, under a hard time budget, stopping on
+    # no progress. Wrapped so any error just leaves the current coverage in place.
+    try:
+        import time as _t
+        _deadline = _t.monotonic() + GAPFILL_BUDGET_S
+        for _rnd in range(GAPFILL_ROUNDS):
+            missing = [t for t in tickers if t not in today_bars]
+            if not missing or _t.monotonic() > _deadline:
+                break
+            before = len(today_bars)
+            print(f"[screener] {exchange} {bar_min}min: gap-fill round {_rnd+1} — {len(missing)} missing")
+            # Angel-first for the missing set (NSE/BSE only)
+            if exchange in ("NSE", "BSE"):
+                try:
+                    from angel_client import download_nse_ohlcv as _adl, is_available as _aok
+                    if _aok():
+                        a15 = _adl(missing, intraday=True, today_only=True, max_workers=3)
+                        for _tk, _d15 in (a15 or {}).items():
+                            _db = _resample_intraday(_d15, exchange, bar_min, min_bars=1)
+                            if _db is not None and not _db.empty:
+                                today_bars[_tk] = _db
+                except Exception as _ae:
+                    print(f"[screener] gap-fill Angel error: {type(_ae).__name__}: {_ae}")
+            # yfinance for whatever Angel still couldn't get (smaller batches)
+            still = [t for t in tickers if t not in today_bars]
+            for _i in range(0, len(still), GAPFILL_YF_BATCH):
+                if _t.monotonic() > _deadline:
+                    break
+                today_bars.update(_yf_today_bars(still[_i:_i + GAPFILL_YF_BATCH], exchange, bar_min))
+            if len(today_bars) <= before:
+                break                      # no progress this round → stop spinning
+            _t.sleep(GAPFILL_BACKOFF_S)    # let rate limits recover before next round
+    except Exception as _ge:
+        print(f"[screener] gap-fill pass error ({type(_ge).__name__}: {_ge}) — using partial coverage")
+
     # ── Record source breakdown for /api/angel/status ────────────────────────
     angel_count = len(today_bars) - len([t for t in today_bars if t in (yf_tickers if exchange in ("NSE","BSE") else tickers)])
     yf_count    = len([t for t in today_bars if t in yf_tickers]) if exchange in ("NSE","BSE") and yf_tickers else (len(today_bars) if exchange not in ("NSE","BSE") else 0)
@@ -1352,6 +1441,8 @@ def _topup_intraday(
         "timestamp":    datetime.datetime.now().isoformat(timespec="seconds"),
         "total":        len(tickers),
         "got_today":    len(today_bars),
+        "coverage_pct": round(100 * len(today_bars) / max(1, len(tickers)), 1),
+        "missing":      len(tickers) - len(today_bars),
         "source":       ("angel_one" if used_angel and not yf_tickers else
                          "mixed"     if used_angel and yf_tickers else
                          "yfinance"),
@@ -1383,6 +1474,46 @@ def _topup_intraday(
                 merged[ticker] = hist  # top-up missed this ticker — preserve existing bars
         # Skip tickers with today's bars only — too few rows for SMA(50)
     return merged
+
+
+def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
+    """Force a today-only intraday top-up NOW and persist the cache.
+
+    Driven by the market-hours refresh cron so the daily scan's injected 'today'
+    bar tracks the session instead of freezing at the 10:45 prewarm. Overlap-
+    guarded via _TOPUP_RUNNING so scheduled + on-demand refreshes never stack
+    (stacking is what jammed the box). Never raises — returns a coverage summary."""
+    key = f"{exchange}_{bar_min}"
+    with _TOPUP_RUNNING_LOCK:
+        if key in _TOPUP_RUNNING:
+            return {"skipped": "already running", "exchange": exchange, "bar_min": bar_min}
+        _TOPUP_RUNNING.add(key)
+    try:
+        tickers = UNIVERSES.get(exchange, [])
+        if not tickers:
+            return {"skipped": "empty universe", "exchange": exchange}
+        prev = _load_intraday_cache(exchange, bar_min)
+        if prev is None:
+            # No base history yet (cold) — fall back to the full builder.
+            _download_intraday_ohlcv(exchange, tickers, bar_min)
+            return {"built": "full", "exchange": exchange, "bar_min": bar_min}
+        data = _topup_intraday(exchange, prev, tickers, bar_min)   # includes gap-fill
+        today_str = datetime.date.today().isoformat()
+        today_count = sum(
+            1 for _t, _df in data.items()
+            if _df is not None and not _df.empty and str(_df.index[-1])[:10] == today_str
+        )
+        if today_count > 0:
+            _save_intraday_cache(exchange, bar_min, data)
+        return {"exchange": exchange, "bar_min": bar_min,
+                "today_coverage": today_count, "universe": len(tickers),
+                "coverage_pct": round(100 * today_count / max(1, len(tickers)), 1)}
+    except Exception as e:
+        print(f"[refresh] refresh_intraday_today error: {type(e).__name__}: {e}")
+        return {"error": str(e), "exchange": exchange}
+    finally:
+        with _TOPUP_RUNNING_LOCK:
+            _TOPUP_RUNNING.discard(key)
 
 
 def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) -> Dict[str, pd.DataFrame]:

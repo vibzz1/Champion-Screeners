@@ -10,7 +10,7 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP, _IND_CACHE, _IND_CACHE_LOCK
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP, _IND_CACHE, _IND_CACHE_LOCK, refresh_intraday_today, _is_market_open
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -41,6 +41,20 @@ def _prewarm_intraday_background():
         prewarm_intraday_ohlcv_cache([("NSE", 75)])
     except Exception as e:
         print(f"[prewarm] intraday background error: {e}")
+
+def _intraday_refresh_job():
+    """Market-hours NSE intraday refresh — keeps the daily scan's injected 'today'
+    bar tracking the session instead of freezing at the 10:45 prewarm. Runs every
+    15 min through the session and every 5 min in the final hour (see scheduler).
+    Skips when the market is closed and is overlap-guarded inside
+    refresh_intraday_today, so scheduled ticks never stack."""
+    try:
+        if not _is_market_open("NSE"):
+            return
+        r = refresh_intraday_today("NSE", 75)
+        print(f"[refresh] intraday refresh: {r}")
+    except Exception as e:
+        print(f"[refresh] intraday refresh job error: {e}")
 
 # International daily caches are warmed out-of-band so the very first user scan
 # never downloads a large universe inside the request (the timeout that forced
@@ -118,6 +132,25 @@ async def startup_event():
             CronTrigger(hour=5, minute=15, day_of_week="mon-fri", timezone=pytz.utc),
             id="nse_prewarm_intraday",
             replace_existing=True,
+        )
+        # Market-hours intraday refresh — keeps today's bar fresh through the session
+        # so afternoon/near-close breakouts are visible (the job self-skips when the
+        # market is closed; refresh_intraday_today is overlap-guarded).
+        #   General: every 15 min, IST 9:30–15:30 (04:00–10:00 UTC)
+        scheduler.add_job(
+            _intraday_refresh_job,
+            CronTrigger(minute="*/15", hour="4-10", day_of_week="mon-fri", timezone=pytz.utc),
+            id="nse_intraday_refresh_15",
+            replace_existing=True,
+            max_instances=1, coalesce=True,
+        )
+        #   Near-close boost: every 5 min in the final hour, IST 14:30–15:29 (09:00–09:59 UTC)
+        scheduler.add_job(
+            _intraday_refresh_job,
+            CronTrigger(minute="*/5", hour="9", day_of_week="mon-fri", timezone=pytz.utc),
+            id="nse_intraday_refresh_5",
+            replace_existing=True,
+            max_instances=1, coalesce=True,
         )
         # International daily caches: 00:30 UTC — before all Asian opens, off-peak.
         scheduler.add_job(
