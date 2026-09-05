@@ -29,18 +29,24 @@ app = FastAPI()
 # ── Cache pre-warm scheduler ────────────────────────────────────────────────
 def _prewarm_daily_background():
     """Warm daily OHLCV cache — runs at 08:00 IST (2:30 UTC) Mon–Fri.
-    Then warm the indicator cache so the day's first user scan is instant."""
+    The indicator-cache warm is deferred to _prewarm_intraday_background so it runs
+    AFTER the today-bar (intraday) has settled — warming here would cache a
+    fingerprint that later scans no longer match (startup race)."""
     try:
         prewarm_ohlcv_cache(["NSE"])
-        warm_indicator_cache("NSE")
     except Exception as e:
         print(f"[prewarm] daily background error: {e}")
 
 def _prewarm_intraday_background():
     """Warm intraday OHLCV cache — runs at 10:45 IST (5:15 UTC) Mon–Fri.
-    First complete 75-min bar closes at 10:30 IST; 10:45 gives 15-min margin."""
+    First complete 75-min bar closes at 10:30 IST; 10:45 gives 15-min margin.
+    Then warm the indicator cache: at this point the OHLCV the next scan will read
+    is settled, so the warmed fingerprint matches real scans and the first scan is
+    instant. (Before the intraday cache exists / during the early live-injection
+    window the cache is bypassed by design, so warming earlier wouldn't stick.)"""
     try:
         prewarm_intraday_ohlcv_cache([("NSE", 75)])
+        warm_indicator_cache("NSE")
     except Exception as e:
         print(f"[prewarm] intraday background error: {e}")
 
