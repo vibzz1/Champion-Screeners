@@ -19,6 +19,7 @@ import datetime
 import os
 import json
 import hashlib
+import time as _time_module
 import re as _re_module
 import concurrent.futures
 import yfinance as yf
@@ -1082,6 +1083,7 @@ _TOPUP_RUNNING_LOCK = _topup_threading.Lock()
 _IND_CACHE: dict = {}                    # key -> {ticker: ind_dict}
 _IND_CACHE_LOCK = _topup_threading.Lock()
 _IND_CACHE_MAX  = 6                       # keep a few exchange/date entries; ~4MB each
+_WARM_RUNNING: set = set()               # exchanges currently warming (overlap guard)
 
 def _ohlcv_signature(tickers: List[str], ohlcv_data: Dict[str, pd.DataFrame]) -> str:
     """A cheap content fingerprint of the CURRENT last bar across the universe.
@@ -1514,6 +1516,130 @@ def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
     finally:
         with _TOPUP_RUNNING_LOCK:
             _TOPUP_RUNNING.discard(key)
+
+
+def warm_indicator_cache(exchange: str = "NSE") -> dict:
+    """Pre-compute + cache all indicator dicts for the current data so the user's
+    FIRST scan is instant instead of paying the ~50s cold compute. Keyed on the
+    same data fingerprint run_screen uses, so it warms exactly what the next scan
+    reads. Uses a match-nothing formula: the full compute pass runs (populating
+    _IND_CACHE) while the per-match enrich is skipped. Overlap-guarded; never raises.
+    Called after each OHLCV prewarm / intraday refresh so scans stay fast all day."""
+    with _IND_CACHE_LOCK:
+        if exchange in _WARM_RUNNING:
+            return {"skipped": "already warming", "exchange": exchange}
+        _WARM_RUNNING.add(exchange)
+    try:
+        f = parse_formula("advol(20) > 999999999", exchange=exchange)  # matches ~nothing
+        run_screen(exchange, f)                # side effect: fills _IND_CACHE for current data
+        with _IND_CACHE_LOCK:
+            n = sum(len(v) for v in _IND_CACHE.values())
+        print(f"[prewarm] indicator cache warmed for {exchange} — {n} dicts cached")
+        return {"warmed": True, "exchange": exchange, "cached_dicts": n}
+    except Exception as e:
+        print(f"[prewarm] warm_indicator_cache error: {type(e).__name__}: {e}")
+        return {"error": str(e), "exchange": exchange}
+    finally:
+        with _IND_CACHE_LOCK:
+            _WARM_RUNNING.discard(exchange)
+
+
+_BREADTH_CACHE: dict = {}                 # exchange -> {"t": epoch, "data": {...}}
+_BREADTH_TTL = 600                        # serve cached breadth for 10 min
+_INDEX_SYMBOL = {"NSE": "^NSEI", "BSE": "^BSESN", "SP500": "^GSPC",
+                 "NASDAQ": "^IXIC", "NYSE": "^NYA", "XETRA": "^GDAXI"}
+
+def _index_regime(exchange: str) -> Optional[dict]:
+    """Fetch the market index (e.g. ^NSEI) and read it vs its 50/200-DMA. None on any error."""
+    sym = _INDEX_SYMBOL.get(exchange)
+    if not sym:
+        return None
+    try:
+        raw = yf.download(sym, period="1y", interval="1d", auto_adjust=True, progress=False)
+        if raw is None or raw.empty:
+            return None
+        if isinstance(raw.columns, pd.MultiIndex):
+            raw.columns = raw.columns.get_level_values(0)
+        close = raw["Close"].dropna()
+        if len(close) < 50:
+            return None
+        price = float(close.iloc[-1])
+        prev  = float(close.iloc[-2]) if len(close) >= 2 else price
+        sma50  = float(close.tail(50).mean())
+        sma200 = float(close.tail(200).mean()) if len(close) >= 200 else None
+        return {
+            "symbol": sym, "price": round(price, 2),
+            "change_pct": round((price - prev) / prev * 100, 2) if prev else 0.0,
+            "sma50": round(sma50, 2), "sma200": round(sma200, 2) if sma200 else None,
+            "above_50dma": price > sma50,
+            "above_200dma": (sma200 is not None and price > sma200),
+        }
+    except Exception as e:
+        print(f"[breadth] index fetch error ({exchange}): {type(e).__name__}: {e}")
+        return None
+
+def compute_breadth(exchange: str = "NSE") -> dict:
+    """Market-regime + breadth snapshot. Aggregates the warm indicator cache
+    (price vs 50/200-DMA, day change, new highs) — cheap, no recompute — and adds
+    the index's own DMA read for an overall regime label. Cached ~10 min; if the
+    indicator cache isn't warm yet it warms it first. Never raises."""
+    now = _time_module.time()
+    hit = _BREADTH_CACHE.get(exchange)
+    if hit and (now - hit["t"]) < _BREADTH_TTL:
+        return hit["data"]
+    try:
+        # newest indicator-cache entry for this exchange (warm runs keep it current)
+        inds = None
+        with _IND_CACHE_LOCK:
+            for k in reversed(list(_IND_CACHE.keys())):
+                if k[0] == exchange:
+                    inds = _IND_CACHE[k]; break
+        if not inds:
+            # Don't block the request on a ~50s warm — kick it in the background and
+            # tell the dashboard to retry shortly. Startup/prewarm normally warms this
+            # before any user visits, so this only shows briefly after a cold boot.
+            if exchange not in _WARM_RUNNING:
+                _topup_threading.Thread(target=warm_indicator_cache, args=(exchange,), daemon=True).start()
+            return {"warming": True, "exchange": exchange}
+
+        vals = list(inds.values())
+        n = len(vals)
+        a50  = sum(1 for i in vals if i.get("price") and i.get("sma50")  and i["price"] > i["sma50"])
+        a200 = sum(1 for i in vals if i.get("price") and i.get("sma200") and i["price"] > i["sma200"])
+        adv  = sum(1 for i in vals if (i.get("change_pct") or 0) > 0)
+        dec  = sum(1 for i in vals if (i.get("change_pct") or 0) < 0)
+        flat = n - adv - dec
+        nh   = sum(1 for i in vals if i.get("new_52w_high"))
+        avg_chg = round(sum((i.get("change_pct") or 0) for i in vals) / max(1, n), 2)
+        pct50  = round(100 * a50  / max(1, n), 1)
+        pct200 = round(100 * a200 / max(1, n), 1)
+
+        idx = _index_regime(exchange)
+        # Regime: index trend is primary, universe breadth confirms.
+        if idx is not None:
+            if idx["above_50dma"] and idx.get("above_200dma") and pct50 >= 55:
+                regime = "risk_on"
+            elif (not idx["above_50dma"]) and pct50 <= 40:
+                regime = "risk_off"
+            else:
+                regime = "neutral"
+        else:
+            regime = "risk_on" if pct50 >= 60 else "risk_off" if pct50 <= 35 else "neutral"
+
+        data = {
+            "exchange": exchange, "as_of": datetime.datetime.now().isoformat(timespec="seconds"),
+            "regime": regime, "index": idx,
+            "universe": {
+                "total": n, "pct_above_50dma": pct50, "pct_above_200dma": pct200,
+                "advancers": adv, "decliners": dec, "unchanged": flat,
+                "new_52w_highs": nh, "avg_change_pct": avg_chg,
+            },
+        }
+        _BREADTH_CACHE[exchange] = {"t": now, "data": data}
+        return data
+    except Exception as e:
+        print(f"[breadth] compute error ({exchange}): {type(e).__name__}: {e}")
+        return {"error": str(e), "exchange": exchange}
 
 
 def _download_intraday_ohlcv(exchange: str, tickers: List[str], bar_min: int) -> Dict[str, pd.DataFrame]:

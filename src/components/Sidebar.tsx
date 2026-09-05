@@ -21,6 +21,7 @@ function loadScreeners(): SavedScreener[] {
 }
 
 const OTHER_NAV = [
+  { label: "Market Dashboard",    href: "/dashboard"   },
   { label: "Strategy Backtester", href: "/backtester" },
   { label: "Watch Lists",         href: "/watchlists"  },
   { label: "Portfolio Tracker",   href: "/portfolio"   },

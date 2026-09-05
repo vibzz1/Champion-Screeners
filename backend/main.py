@@ -10,7 +10,7 @@ import threading
 import pytz
 from database import get_db, engine
 import models
-from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP, _IND_CACHE, _IND_CACHE_LOCK, refresh_intraday_today, _is_market_open
+from screener import run_screen, UNIVERSES, PRESETS, OHLCV_CACHE_DIR, parse_formula, prewarm_ohlcv_cache, prewarm_intraday_ohlcv_cache, _SCREEN_PROGRESS, _LAST_TOPUP, _IND_CACHE, _IND_CACHE_LOCK, refresh_intraday_today, _is_market_open, warm_indicator_cache, compute_breadth
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -28,9 +28,11 @@ app = FastAPI()
 
 # ── Cache pre-warm scheduler ────────────────────────────────────────────────
 def _prewarm_daily_background():
-    """Warm daily OHLCV cache — runs at 08:00 IST (2:30 UTC) Mon–Fri."""
+    """Warm daily OHLCV cache — runs at 08:00 IST (2:30 UTC) Mon–Fri.
+    Then warm the indicator cache so the day's first user scan is instant."""
     try:
         prewarm_ohlcv_cache(["NSE"])
+        warm_indicator_cache("NSE")
     except Exception as e:
         print(f"[prewarm] daily background error: {e}")
 
@@ -53,6 +55,7 @@ def _intraday_refresh_job():
             return
         r = refresh_intraday_today("NSE", 75)
         print(f"[refresh] intraday refresh: {r}")
+        warm_indicator_cache("NSE")   # re-warm so scans stay instant on the fresh data
     except Exception as e:
         print(f"[refresh] intraday refresh job error: {e}")
 
@@ -366,6 +369,11 @@ def intraday_status():
         result["verdict"] = f"⚠ Cache has {result['last_bar_date']} bars, not today's — top-up pending"
 
     return result
+
+@app.get("/api/market/breadth")
+def market_breadth(exchange: str = "NSE"):
+    """Market-regime + breadth snapshot for the dashboard (cached ~10 min)."""
+    return compute_breadth(exchange)
 
 @app.post("/api/bhavcopy/dedup")
 def bhavcopy_dedup():
