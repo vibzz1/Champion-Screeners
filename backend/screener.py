@@ -3233,8 +3233,14 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
             and str(df.index[-1])[:10] == today_str
             for t in list(tickers)[:10]
         )
-        if not cache_has_today:
-            print(f"[screener] {exchange}: today's bar missing from cache — injecting…")
+        # Only inject "live" bars while the market is actually open. When it's closed
+        # (weekend / after-hours / pre-open) there is nothing live — the last Bhavcopy
+        # close IS the authoritative bar, and fetching stale quotes here would only
+        # populate live_bars and force the indicator cache to bypass (so scans stay
+        # slow and the dashboard never warms). Gating on market-open lets the cache
+        # populate off stable EOD data.
+        if not cache_has_today and _is_market_open(exchange):
+            print(f"[screener] {exchange}: today's bar missing during market hours — injecting live…")
             if exchange in ("NSE", "BSE"):
                 live_bars = _fetch_live_nse_bars(tickers)
             else:
@@ -3318,7 +3324,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     # (cache_has_today=False). Once bhavcopy lands (~19:00 IST) cache_has_today
     # becomes True and the authoritative EOD data is used as-is.
     # No exchange or market-hours filter — applies to NSE, BSE, US, all others.
-    if not as_of_date and matched_tickers and not cache_has_today:
+    if not as_of_date and matched_tickers and not cache_has_today and _is_market_open(exchange):
         try:
             fresh = _fetch_fresh_5min_bars(matched_tickers)
             if fresh:
