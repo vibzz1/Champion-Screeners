@@ -9,6 +9,7 @@ import { InteractiveChart }  from "./InteractiveChart";
 import { Sparkline }         from "./Sparkline";
 import { FormulaEditor }     from "./FormulaEditor";
 import { ScanProgress }      from "./ScanProgress";
+import { StockDrawer }       from "./StockDrawer";
 
 const API           = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const LS_KEY        = SCREENER_LS_KEY;
@@ -131,6 +132,7 @@ export default function ScreenerPage() {
   const [scanDuration, setScanDuration] = useState<number | null>(null);
   const [restored,     setRestored]     = useState(false); // true when showing cached last-scan
   const [watchlistSyms, setWatchlistSyms] = useState<Set<string>>(new Set());
+  const [drawerStock, setDrawerStock] = useState<Result | null>(null);
   const FAV_KEY = "mio_favorites_v1";
   const resultsRef = useRef<HTMLDivElement>(null);
   const CHART_H: Record<string, number> = { sm: 160, md: 230, lg: 380 };
@@ -282,13 +284,14 @@ export default function ScreenerPage() {
     } catch {}
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load all watchlist symbols for badge display
-  useEffect(() => {
+  // Load all watchlist symbols for badge display (reused after drawer adds one)
+  const loadWatchlistSyms = useCallback(() => {
     fetch(`${API}/api/watchlists/all-symbols`)
       .then(r => r.ok ? r.json() : [])
       .then((syms: string[]) => setWatchlistSyms(new Set(syms)))
       .catch(() => {});
   }, []);
+  useEffect(() => { loadWatchlistSyms(); }, [loadWatchlistSyms]);
 
   function toggleFavorite(r: Result) {
     setFavorites(prev => {
@@ -676,8 +679,8 @@ export default function ScreenerPage() {
       case "symbol":
         return (
           <td key={colId} className="px-2 py-1 font-bold whitespace-nowrap" style={tdBase}>
-            <button onClick={() => { setJumpToTicker(r.ticker); setView("charts"); }}
-              className="hover:underline" style={{ color: "var(--mio-ticker)" }} title="View chart">
+            <button onClick={() => setDrawerStock(r)}
+              className="hover:underline" style={{ color: "var(--mio-ticker)" }} title="View details">
               {r.symbol}
             </button>
             {r.new_52w_high && <span className="ml-1 text-[10px] bg-green-100 text-green-700 rounded px-1">52H</span>}
@@ -1567,6 +1570,16 @@ export default function ScreenerPage() {
           </>
         )}
       </div>
+
+      <StockDrawer
+        stock={drawerStock}
+        onClose={() => setDrawerStock(null)}
+        exchange={active?.exchange ?? "NSE"}
+        masterBars={masterZoom}
+        inWatchlist={drawerStock ? watchlistSyms.has(drawerStock.symbol) : false}
+        onWatchlistChange={loadWatchlistSyms}
+        api={API}
+      />
     </div>
   );
 }
