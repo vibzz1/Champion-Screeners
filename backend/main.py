@@ -763,16 +763,19 @@ def get_quotes(symbols: str = ""):
     Searches every exchange's OHLCV cache; returns whichever has data first.
     Symbols should be the base ticker without exchange suffix (e.g. RELIANCE, AAPL).
     """
-    from screener import _load_ohlcv_cache, compute_indicators, UNIVERSES
+    from screener import _load_ohlcv_cache, compute_indicators, UNIVERSES, quotes_from_warm_cache
     import re as _re
 
     if not symbols.strip():
         return {}
 
     wanted = {s.strip().upper() for s in symbols.split(",") if s.strip()}
-    result: dict = {}
 
-    # Suffix patterns to strip when matching
+    # 1) Fresh quotes from the warm indicator cache — the SAME data the scanner
+    #    shows. Fixes watchlist/portfolio reading stale prices off the old disk pickle.
+    result: dict = quotes_from_warm_cache(wanted)
+
+    # 2) Fall back to the on-disk OHLCV cache for anything not warm (international / cold).
     _SUFFIX = _re.compile(r'\.(NS|BO|T|KS|KQ|DE)$', _re.IGNORECASE)
 
     for exchange in ["NSE", "BSE", "SP500", "NASDAQ", "NYSE", "TSE", "KOSPI", "KOSDAQ", "XETRA"]:

@@ -1084,6 +1084,7 @@ _IND_CACHE: dict = {}                    # key -> {ticker: ind_dict}
 _IND_CACHE_LOCK = _topup_threading.Lock()
 _IND_CACHE_MAX  = 6                       # keep a few exchange/date entries; ~4MB each
 _WARM_RUNNING: set = set()               # exchanges currently warming (overlap guard)
+_QUOTE_SUFFIX_RE = _re_module.compile(r'\.(NS|BO|T|KS|KQ|DE|TW|SS|SZ)$', _re_module.IGNORECASE)
 
 def _ohlcv_signature(tickers: List[str], ohlcv_data: Dict[str, pd.DataFrame]) -> str:
     """A cheap content fingerprint of the CURRENT last bar across the universe.
@@ -1516,6 +1517,38 @@ def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
     finally:
         with _TOPUP_RUNNING_LOCK:
             _TOPUP_RUNNING.discard(key)
+
+
+def quotes_from_warm_cache(wanted: set) -> dict:
+    """Fresh quotes (price/change_pct/rsi/volume) for base symbols, read from the
+    warm indicator cache — the SAME fresh data the scanner shows — so watchlist and
+    portfolio prices match the screener instead of a stale on-disk pickle. Returns
+    only symbols found; the caller falls back to the disk cache for the rest
+    (international / cold). Never raises."""
+    out: Dict[str, dict] = {}
+    if not wanted:
+        return out
+    try:
+        with _IND_CACHE_LOCK:
+            snapshot = list(_IND_CACHE.items())        # newest inserted last
+        for key, inds in reversed(snapshot):           # walk freshest → oldest
+            if not (wanted - out.keys()):
+                break
+            exchange = key[0] if isinstance(key, tuple) else ""
+            for ticker, ind in inds.items():
+                base = _QUOTE_SUFFIX_RE.sub("", ticker).upper()
+                if base in wanted and base not in out and ind:
+                    out[base] = {
+                        "price":      ind.get("price"),
+                        "change_pct": ind.get("change_pct"),
+                        "rsi":        ind.get("rsi"),
+                        "volume":     ind.get("volume"),
+                        "ticker":     ticker,
+                        "exchange":   exchange,
+                    }
+    except Exception as e:
+        print(f"[quotes] warm-cache read error: {type(e).__name__}: {e}")
+    return out
 
 
 def warm_indicator_cache(exchange: str = "NSE") -> dict:

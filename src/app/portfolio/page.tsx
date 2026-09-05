@@ -17,17 +17,38 @@ const EMPTY_FORM = { symbol: "", name: "", quantity: "", buy_price: "", current_
 
 export default function PortfolioPage() {
   const [positions, setPositions] = useState<Position[]>([]);
+  const [quotes, setQuotes] = useState<Record<string, { price: number; change_pct: number }>>({});
+  const [loadingQ, setLoadingQ] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingPrice, setEditingPrice] = useState<{ id: number; value: string } | null>(null);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
 
+  async function fetchQuotes(syms: string[]) {
+    if (!syms.length) { setQuotes({}); return; }
+    setLoadingQ(true);
+    try {
+      const r = await fetch(`${API}/api/screener/quotes?symbols=${encodeURIComponent(syms.join(","))}`);
+      if (r.ok) {
+        const q = await r.json() as Record<string, { price: number | null; change_pct: number | null }>;
+        const map: Record<string, { price: number; change_pct: number }> = {};
+        for (const [sym, v] of Object.entries(q)) {
+          if (v && v.price != null) map[sym] = { price: v.price, change_pct: v.change_pct ?? 0 };
+        }
+        setQuotes(map);
+      }
+    } catch { /* keep manual prices as fallback */ }
+    finally { setLoadingQ(false); }
+  }
+
   async function load() {
     try {
       const r = await fetch(`${API}/api/portfolio`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setPositions(await r.json());
+      const data: Position[] = await r.json();
+      setPositions(data);
       setError("");
+      fetchQuotes(data.map(p => p.symbol));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Cannot connect to backend.");
     }
@@ -69,8 +90,10 @@ export default function PortfolioPage() {
     load();
   }
 
+  // Live price when we have a fresh quote, else the manually-stored price.
+  const priceOf = (p: Position) => quotes[p.symbol]?.price ?? p.current_price;
   const totalCost  = positions.reduce((s, p) => s + p.buy_price * p.quantity, 0);
-  const totalValue = positions.reduce((s, p) => s + p.current_price * p.quantity, 0);
+  const totalValue = positions.reduce((s, p) => s + priceOf(p) * p.quantity, 0);
   const totalPnL   = totalValue - totalCost;
   const totalPnLPct = totalCost > 0 ? (totalPnL / totalCost) * 100 : 0;
 
@@ -114,13 +137,27 @@ export default function PortfolioPage() {
       </div>
 
       {/* Add position toggle */}
-      <div className="mb-3">
+      <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
           onClick={() => setShowForm(!showForm)}
           className="px-3 py-1.5 text-xs text-white rounded-lg font-semibold transition-opacity hover:opacity-90"
           style={{ backgroundColor: "var(--mio-accent)" }}>
           {showForm ? "Cancel" : "+ Add Position"}
         </button>
+        {positions.length > 0 && (
+          <button
+            onClick={() => fetchQuotes(positions.map((p) => p.symbol))}
+            className="px-2.5 py-1.5 text-[11px] rounded-lg border font-semibold transition-colors"
+            style={{ borderColor: "var(--mio-border)", color: "var(--mio-text2)" }}>
+            {loadingQ ? "Refreshing…" : "↻ Refresh prices"}
+          </button>
+        )}
+        {Object.keys(quotes).length > 0 && (
+          <span className="text-[11px]" style={{ color: "var(--mio-text3)" }}>
+            <span className="inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle" style={{ background: "var(--mio-up)" }} />
+            Prices auto-updated live · P&amp;L uses them automatically
+          </span>
+        )}
       </div>
 
       {/* Add form */}
@@ -179,10 +216,12 @@ export default function PortfolioPage() {
             </thead>
             <tbody>
               {positions.map((p) => {
+                const q     = quotes[p.symbol];
+                const cur   = q?.price ?? p.current_price;
                 const cost  = p.buy_price * p.quantity;
-                const value = p.current_price * p.quantity;
+                const value = cur * p.quantity;
                 const pnl   = value - cost;
-                const pnlPct = (pnl / cost) * 100;
+                const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
                 const green = pnl >= 0;
 
                 return (
@@ -192,7 +231,15 @@ export default function PortfolioPage() {
                     <td className="px-2 py-1.5 tabular-nums">{p.quantity}</td>
                     <td className="px-2 py-1.5 tabular-nums">{p.buy_price.toLocaleString()}</td>
                     <td className="px-2 py-1.5 tabular-nums">
-                      {editingPrice?.id === p.id ? (
+                      {q ? (
+                        <span className="inline-flex items-center gap-1.5" title="Live price — auto-updated">
+                          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--mio-up)" }} />
+                          <span>{cur.toLocaleString()}</span>
+                          <span className="text-[10px] font-semibold" style={{ color: (q.change_pct ?? 0) >= 0 ? "var(--mio-up)" : "var(--mio-dn)" }}>
+                            {(q.change_pct ?? 0) >= 0 ? "+" : ""}{q.change_pct}%
+                          </span>
+                        </span>
+                      ) : editingPrice?.id === p.id ? (
                         <div className="flex gap-1">
                           <input
                             type="number"
@@ -207,7 +254,7 @@ export default function PortfolioPage() {
                           <button onClick={() => setEditingPrice(null)} className="text-gray-400">✕</button>
                         </div>
                       ) : (
-                        <span className="cursor-pointer hover:underline" title="Click to edit"
+                        <span className="cursor-pointer hover:underline" title="No live quote — click to set manually"
                           onClick={() => setEditingPrice({ id: p.id, value: p.current_price.toString() })}>
                           {p.current_price.toLocaleString()}
                         </span>
