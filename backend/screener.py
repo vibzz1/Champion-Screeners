@@ -1053,6 +1053,11 @@ GAPFILL_BUDGET_S  = 45    # hard wall-clock budget for the whole gap-fill pass
 GAPFILL_YF_BATCH  = 40    # smaller yfinance batch during gap-fill = fewer silent drops
 GAPFILL_BACKOFF_S = 2     # pause between rounds so yfinance/Angel rate limits recover
 
+# On-demand freshness: a daily scan during market hours refreshes today's intraday
+# bar if it's older than this. Pull-when-you-scan (a few times/day) instead of a
+# background timer hammering yfinance every 15 min all day (which throttles the IP).
+INTRADAY_FRESH_MIN = 20
+
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
     "phase":    "idle",   # idle | cache | downloading | filtering
@@ -1477,6 +1482,24 @@ def _topup_intraday(
                 merged[ticker] = hist  # top-up missed this ticker — preserve existing bars
         # Skip tickers with today's bars only — too few rows for SMA(50)
     return merged
+
+
+def _intraday_stale(exchange: str, window_min: int) -> bool:
+    """True if today's intraday bar hasn't been topped up within window_min.
+    Reads the last-topup timestamp; treats 'never / different exchange / unparseable'
+    as stale. Both times come from datetime.now() on the box, so the comparison is
+    timezone-agnostic. Fail-safe: on any error returns True (refresh rather than
+    silently serve stale)."""
+    try:
+        if _LAST_TOPUP.get("exchange") != exchange:
+            return True
+        ts = _LAST_TOPUP.get("timestamp")
+        if not ts:
+            return True
+        age_min = (datetime.datetime.now() - datetime.datetime.fromisoformat(ts)).total_seconds() / 60.0
+        return age_min > window_min
+    except Exception:
+        return True
 
 
 def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
@@ -3249,6 +3272,19 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
         return matched, False
 
     # ── Daily path (default) ──────────────────────────────────────────────
+    # Stage 0: On-demand freshness. During market hours, if today's intraday bar
+    # is stale, pull fresh bars NOW so this scan reflects the current market — the
+    # user can run the scanner anytime 9:30–15:30 and get current data, without a
+    # background timer hammering yfinance all day. Overlap-guarded + bounded, so a
+    # concurrent scan won't double-fetch and a throttled source can't hang forever;
+    # on any failure we fall through to whatever bars we already have.
+    if (not as_of_date) and exchange in ("NSE", "BSE") and _is_market_open(exchange) \
+            and _intraday_stale(exchange, INTRADAY_FRESH_MIN):
+        try:
+            refresh_intraday_today(exchange, 75)
+        except Exception as _rex:
+            print(f"[screener] on-demand refresh error: {type(_rex).__name__}: {_rex}")
+
     # Stage 1: Historical OHLCV (cache or download)
     ohlcv_data = _download_ohlcv(exchange, tickers)
 
