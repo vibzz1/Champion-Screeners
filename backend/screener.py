@@ -1057,6 +1057,14 @@ GAPFILL_BACKOFF_S = 2     # pause between rounds so yfinance/Angel rate limits r
 # bar if it's older than this. Pull-when-you-scan (a few times/day) instead of a
 # background timer hammering yfinance every 15 min all day (which throttles the IP).
 INTRADAY_FRESH_MIN = 20
+# Don't attempt an on-demand refresh more than once per this window, even if the
+# data still looks stale — so a failing/slow refresh (e.g. yfinance throttled) can't
+# be re-fired by every scan, which would keep the source throttled. Scans during the
+# cooldown just serve the bars we already have (fast). Reset on process restart.
+REFRESH_COOLDOWN_S = 180
+REFRESH_WAIT_S     = 75    # max a scan waits for the on-demand refresh; if slower it
+                          # proceeds on existing bars and the refresh finishes in the bg
+_LAST_REFRESH_ATTEMPT: dict = {}         # exchange -> monotonic time of last attempt
 
 # ── Global scan progress — polled by GET /api/screener/progress ───────────────
 _SCREEN_PROGRESS: dict = {
@@ -3280,10 +3288,18 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     # on any failure we fall through to whatever bars we already have.
     if (not as_of_date) and exchange in ("NSE", "BSE") and _is_market_open(exchange) \
             and _intraday_stale(exchange, INTRADAY_FRESH_MIN):
-        try:
-            refresh_intraday_today(exchange, 75)
-        except Exception as _rex:
-            print(f"[screener] on-demand refresh error: {type(_rex).__name__}: {_rex}")
+        _now_m = _time_module.monotonic()
+        if _now_m - _LAST_REFRESH_ATTEMPT.get(exchange, 0.0) > REFRESH_COOLDOWN_S:
+            _LAST_REFRESH_ATTEMPT[exchange] = _now_m   # mark BEFORE, so a slow one still gates
+            try:
+                # Bounded: wait up to REFRESH_WAIT_S for fresh bars; if the source is
+                # slow/throttled the scan proceeds on existing bars and the refresh
+                # completes in the background (ready for the next scan) — never hangs.
+                _rt = _topup_threading.Thread(target=refresh_intraday_today, args=(exchange, 75), daemon=True)
+                _rt.start()
+                _rt.join(REFRESH_WAIT_S)
+            except Exception as _rex:
+                print(f"[screener] on-demand refresh error: {type(_rex).__name__}: {_rex}")
 
     # Stage 1: Historical OHLCV (cache or download)
     ohlcv_data = _download_ohlcv(exchange, tickers)
