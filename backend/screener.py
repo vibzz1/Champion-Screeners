@@ -1048,10 +1048,16 @@ DOWNLOAD_WORKERS        = 2     # concurrent batch downloads — kept low for Ra
 # entries are same-day). After the main passes we retry the STILL-missing set,
 # Angel-first with backoff, over a few rounds under a hard time budget so it can
 # never hang the box. All fail-safe: worst case is today's (current) coverage.
-GAPFILL_ROUNDS    = 3     # bounded retry rounds for tickers still missing today's bar
-GAPFILL_BUDGET_S  = 45    # hard wall-clock budget for the whole gap-fill pass
-GAPFILL_YF_BATCH  = 40    # smaller yfinance batch during gap-fill = fewer silent drops
+GAPFILL_ROUNDS    = 5     # bounded retry rounds for tickers still missing today's bar
+GAPFILL_BUDGET_S  = 90    # hard wall-clock budget for the whole gap-fill pass
+GAPFILL_YF_BATCH  = 10    # small yfinance batch during gap-fill so one bad ticker can't
+                          # drop its batch-mates (isolates stragglers like BEPL/SKIPPER)
 GAPFILL_BACKOFF_S = 2     # pause between rounds so yfinance/Angel rate limits recover
+GAPFILL_MAX_BARREN = 2    # give up only after this many CONSECUTIVE no-gain rounds, so a
+                          # transient rate-limit round can recover on the next attempt
+GAPFILL_SINGLE_MAX = 40   # if <= this many stragglers remain after the rounds, fetch each
+                          # one INDIVIDUALLY (fully isolates a stubborn single ticker)
+GAPFILL_SINGLE_BUDGET_S = 30   # extra budget for that final one-at-a-time pass
 
 # On-demand freshness: a daily scan during market hours refreshes today's intraday
 # bar if it's older than this. Pull-when-you-scan (a few times/day) instead of a
@@ -1062,7 +1068,7 @@ INTRADAY_FRESH_MIN = 20
 # be re-fired by every scan, which would keep the source throttled. Scans during the
 # cooldown just serve the bars we already have (fast). Reset on process restart.
 REFRESH_COOLDOWN_S = 180
-REFRESH_WAIT_S     = 75    # max a scan waits for the on-demand refresh; if slower it
+REFRESH_WAIT_S     = 95    # max a scan waits for the on-demand refresh; if slower it
                           # proceeds on existing bars and the refresh finishes in the bg
 _LAST_REFRESH_ATTEMPT: dict = {}         # exchange -> monotonic time of last attempt
 
@@ -1417,6 +1423,7 @@ def _topup_intraday(
     try:
         import time as _t
         _deadline = _t.monotonic() + GAPFILL_BUDGET_S
+        _barren = 0
         for _rnd in range(GAPFILL_ROUNDS):
             missing = [t for t in tickers if t not in today_bars]
             if not missing or _t.monotonic() > _deadline:
@@ -1435,15 +1442,31 @@ def _topup_intraday(
                                 today_bars[_tk] = _db
                 except Exception as _ae:
                     print(f"[screener] gap-fill Angel error: {type(_ae).__name__}: {_ae}")
-            # yfinance for whatever Angel still couldn't get (smaller batches)
+            # yfinance for whatever Angel still couldn't get (small batches isolate failures)
             still = [t for t in tickers if t not in today_bars]
             for _i in range(0, len(still), GAPFILL_YF_BATCH):
                 if _t.monotonic() > _deadline:
                     break
                 today_bars.update(_yf_today_bars(still[_i:_i + GAPFILL_YF_BATCH], exchange, bar_min))
             if len(today_bars) <= before:
-                break                      # no progress this round → stop spinning
+                _barren += 1
+                if _barren >= GAPFILL_MAX_BARREN:
+                    break                  # repeated barren rounds → give up
+            else:
+                _barren = 0
             _t.sleep(GAPFILL_BACKOFF_S)    # let rate limits recover before next round
+
+        # Last resort: fetch each remaining straggler INDIVIDUALLY — fully isolates a
+        # stubborn single ticker (e.g. BEPL) from any batch-mate failure. Only when a
+        # handful remain, within a small extra budget: a few cheap one-ticker fetches.
+        final_missing = [t for t in tickers if t not in today_bars]
+        if final_missing and len(final_missing) <= GAPFILL_SINGLE_MAX:
+            print(f"[screener] {exchange} {bar_min}min: gap-fill solo pass — {len(final_missing)} stragglers")
+            _solo_deadline = _t.monotonic() + GAPFILL_SINGLE_BUDGET_S
+            for _t2 in final_missing:
+                if _t.monotonic() > _solo_deadline:
+                    break
+                today_bars.update(_yf_today_bars([_t2], exchange, bar_min))
     except Exception as _ge:
         print(f"[screener] gap-fill pass error ({type(_ge).__name__}: {_ge}) — using partial coverage")
 
