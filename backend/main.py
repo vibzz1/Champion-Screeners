@@ -353,6 +353,14 @@ def market_breadth(exchange: str = "NSE"):
     """Market-regime + breadth snapshot for the dashboard (cached ~10 min)."""
     return compute_breadth(exchange)
 
+@app.get("/api/intraday/coverage")
+def intraday_coverage(exchange: str = "NSE", bar_min: int = 75, refresh: bool = False):
+    """Coverage report: which universe tickers have today's intraday candle, and which
+    MISSING ones are liquid (could be setups). ?refresh=1 forces a fresh pull first —
+    used by the daily morning coverage check to preempt gaps like BEPL/SKIPPER."""
+    from screener import intraday_coverage_report
+    return intraday_coverage_report(exchange, bar_min, refresh)
+
 @app.post("/api/bhavcopy/dedup")
 def bhavcopy_dedup():
     """Remove stale/duplicate Bhavcopy dates (NSE served a prior day's file for

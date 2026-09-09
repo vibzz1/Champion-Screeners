@@ -1533,6 +1533,65 @@ def _intraday_stale(exchange: str, window_min: int) -> bool:
         return True
 
 
+def intraday_coverage_report(exchange: str = "NSE", bar_min: int = 75, refresh: bool = False) -> dict:
+    """Proactive coverage check: which universe tickers have TODAY's intraday bar, and
+    which of the MISSING ones are LIQUID (could be a setup — a stale illiquid name is
+    noise, a stale liquid one like BEPL is the thing to catch). Optionally forces a
+    fresh pull first, so a morning check verifies the just-closed candle. Never raises."""
+    try:
+        tickers = UNIVERSES.get(exchange, [])
+        if refresh and exchange in ("NSE", "BSE") and _is_market_open(exchange):
+            try:
+                refresh_intraday_today(exchange, bar_min)
+            except Exception as _re:
+                print(f"[coverage] refresh error: {type(_re).__name__}: {_re}")
+        cache = _load_intraday_cache(exchange, bar_min) or {}
+        today = datetime.date.today().isoformat()
+        fresh, missing = [], []
+        for t in tickers:
+            df = cache.get(t)
+            if df is not None and not getattr(df, "empty", True) and str(df.index[-1])[:10] == today:
+                fresh.append(t)
+            else:
+                missing.append(t)
+        # Classify the missing by liquidity (advol, ₹M/day) from the daily Bhavcopy series.
+        missing_liquid = []
+        if missing and exchange == "NSE":
+            try:
+                import nse_bhavcopy
+                bhav = nse_bhavcopy.load_ohlcv() or {}
+                for t in missing:
+                    df = bhav.get(t)
+                    if df is None or getattr(df, "empty", True):
+                        continue
+                    try:
+                        if "TurnoverLacs" in df.columns:
+                            adv = float(df["TurnoverLacs"].tail(20).mean()) / 10.0
+                        else:
+                            adv = float((df["Close"] * df["Volume"]).tail(20).mean()) / 1_000_000.0
+                    except Exception:
+                        continue
+                    if adv >= 100:   # NSE setup advol floor (₹M/day)
+                        missing_liquid.append({"symbol": t.replace(".NS", ""), "advol": round(adv, 1)})
+                missing_liquid.sort(key=lambda x: -x["advol"])
+            except Exception as _be:
+                print(f"[coverage] liquidity classify error: {type(_be).__name__}: {_be}")
+        n = len(tickers)
+        return {
+            "exchange": exchange, "bar_min": bar_min,
+            "as_of": datetime.datetime.now().isoformat(timespec="seconds"),
+            "market_open": _is_market_open(exchange),
+            "total": n, "fresh": len(fresh),
+            "coverage_pct": round(100 * len(fresh) / max(1, n), 1),
+            "missing_count": len(missing),
+            "missing_liquid_count": len(missing_liquid),
+            "missing_liquid": missing_liquid[:60],
+        }
+    except Exception as e:
+        print(f"[coverage] report error: {type(e).__name__}: {e}")
+        return {"error": str(e), "exchange": exchange}
+
+
 def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
     """Force a today-only intraday top-up NOW and persist the cache.
 
