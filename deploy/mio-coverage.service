@@ -1,0 +1,12 @@
+[Unit]
+Description=MIO NSE morning intraday candle-coverage check (-> Telegram)
+After=network-online.target screener-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# systemd reads EnvironmentFile as root before dropping to User=, so the secret
+# file can stay root:root 600 and screener still can't read it.
+User=screener
+EnvironmentFile=/etc/mio-coverage.env
+ExecStart=/usr/bin/env python3 /opt/screener/app/backend/coverage_check.py

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the MIO coverage check at 10:32 on trading weekdays
+
+[Timer]
+# Box is on Asia/Kolkata (timedatectl), so this local time == IST.
+# 10:32 = 2 min after the first NSE 75-min candle closes at 10:30.
+OnCalendar=Mon-Fri 10:32
+# Don't fire a catch-up run if the box was asleep at 10:32.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
