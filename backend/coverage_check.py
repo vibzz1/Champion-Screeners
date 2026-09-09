@@ -32,6 +32,9 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 CHAT = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 COVERAGE_MIN = float(os.environ.get("COVERAGE_MIN", "98"))
 ALWAYS = os.environ.get("COVERAGE_ALWAYS", "1").strip() != "0"
+# The forced refresh (refresh=1) does a full intraday pull and can run ~4 min,
+# so give it real headroom; a stall past this falls back to a fast plain read.
+FETCH_TIMEOUT = float(os.environ.get("COVERAGE_TIMEOUT", "300"))
 
 
 def tg(text: str) -> None:
@@ -52,13 +55,27 @@ def tg(text: str) -> None:
         print(f"telegram send failed: {e}", file=sys.stderr)
 
 
+def fetch(url: str, timeout: float) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.load(r)
+
+
 def main() -> None:
+    stale = False
     try:
-        with urllib.request.urlopen(API, timeout=220) as r:
-            d = json.load(r)
-    except Exception as e:
-        tg(f"⚠ MIO coverage check couldn't reach the screener API: {e}")
-        return
+        d = fetch(API, FETCH_TIMEOUT)
+    except Exception as e_refresh:
+        # Forced refresh stalled/timed out. Fall back to a fast unrefreshed read
+        # so we still deliver a report (tagged) rather than a bare "unreachable".
+        try:
+            d = fetch(API.replace("refresh=1", "refresh=0"), 60)
+            stale = True
+        except Exception as e_plain:
+            tg(
+                "⚠ MIO coverage check couldn't reach the screener API "
+                f"(refresh: {e_refresh}; plain: {e_plain})"
+            )
+            return
 
     # Weekday NSE holidays: market_open is clock-based, so this won't catch
     # every holiday, but when the endpoint already knows the market is shut we
@@ -83,6 +100,8 @@ def main() -> None:
         else "✅ NSE intraday feed healthy"
     )
     lines = [head, f"coverage {pct:.1f}% ({fresh}/{total} fresh)  ·  {as_of}"]
+    if stale:
+        lines.append("(forced refresh timed out — read without a fresh pull; coverage may be understated)")
     if mlc:
         lines.append(f"{mlc} liquid name(s) missing today's candle:")
         for m in missing[:10]:
