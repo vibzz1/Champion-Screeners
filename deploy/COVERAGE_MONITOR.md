@@ -37,11 +37,14 @@ sudo chmod 600 /etc/mio-coverage.env
 ```
 
 ### 3. Deploy the code + install the timer
+Run as **root** (you ssh in as root). Do NOT use `sudo -u screener git pull` — the
+repo's `.git` is root-owned from prior root pulls, so a screener pull dies with
+`FETCH_HEAD: Permission denied`. `safe.directory` is already set for root.
 ```bash
-cd /opt/screener/app && sudo -u screener git pull
-sudo cp deploy/mio-coverage.service deploy/mio-coverage.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now mio-coverage.timer
+cd /opt/screener/app && git pull
+cp deploy/mio-coverage.service deploy/mio-coverage.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now mio-coverage.timer
 ```
 
 ### 4. Test it now (sends a real Telegram message)
