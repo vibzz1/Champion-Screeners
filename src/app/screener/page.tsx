@@ -343,6 +343,9 @@ export default function ScreenerPage() {
     setRS("");
     setIsLive(false);
     setPage(1);
+    // Scans can carry a default sort — the India Setup Scan ranks closest-to-52-week-high
+    // first, which puts ~90% of the master's own setups in the top half of the list.
+    if (s.sort) { setSortKey(s.sort); setSortDir("desc"); }
     setSF("All");
     setCF("All");
     setChipsExpanded(false);

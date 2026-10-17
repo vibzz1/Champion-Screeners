@@ -4,6 +4,7 @@ export interface SavedScreener {
   exchange: string;
   formula: string;
   interval?: string; // "1d" (default) | "15min" (NSE/BSE) | "75min" (NSE/BSE) | "78min" (US)
+  sort?: string;     // default result sort (descending) applied when this scan runs, e.g. "pct_from_52w_high"
 }
 
 export interface OHLCV {

@@ -33,6 +33,16 @@ log = logging.getLogger(__name__)
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", Path(__file__).parent / "cache"))
 DB_PATH   = CACHE_DIR / "bhavcopy.db"
+UNIVERSE_FILE = CACHE_DIR / "nse_universe_official.txt"   # refreshed from NSE's own equity lists
+
+# Stock series to keep. EQ alone drops stocks NSE moves to trade-to-trade (BE/BZ —
+# often after big runs, under ASM/GSM surveillance) and every SME stock (SM/ST), so
+# their data froze while they kept trading. Measured 9 Oct 2026: 263 BE/BZ + 449 SME.
+STOCK_SERIES = {"EQ", "BE", "BZ", "SM", "ST"}
+_UNIVERSE_URLS = (
+    "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",                 # main board
+    "https://nsearchives.nseindia.com/emerge/corporates/content/SME_EQUITY_L.csv",     # SME
+)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── HTTP session ───────────────────────────────────────────────────────────────
@@ -134,10 +144,10 @@ def _parse_bhav_csv(text: str, d: datetime.date) -> Optional[pd.DataFrame]:
             except Exception as _e:
                 log.warning(f"[bhavcopy] {d}: DATE1 parse failed ({_e}) — proceeding")
 
-        # Keep EQ series (equity) only
+        # Keep stock series (EQ + trade-to-trade BE/BZ + SME SM/ST)
         series_col = next((c for c in df.columns if c.upper() == "SERIES"), None)
         if series_col:
-            df = df[df[series_col].str.strip() == "EQ"].copy()
+            df = df[df[series_col].astype(str).str.strip().isin(STOCK_SERIES)].copy()
 
         # Normalise column names across NSE format versions
         col_map = {
@@ -176,7 +186,9 @@ def _parse_bhav_csv(text: str, d: datetime.date) -> Optional[pd.DataFrame]:
 
         cols = ["symbol", "date", "open", "high", "low", "close", "volume", "turnover_lacs"]
         df = df[cols].dropna(subset=["close"])
-        log.info(f"[bhavcopy] {d}: parsed {len(df)} EQ rows")
+        # one row per symbol (a stock can rarely print in two series on the same day)
+        df = df.sort_values("volume").drop_duplicates("symbol", keep="last")
+        log.info(f"[bhavcopy] {d}: parsed {len(df)} stock rows")
         return df
     except Exception as e:
         log.error(f"[bhavcopy] {d}: parse error — {e}")
@@ -227,9 +239,9 @@ def store_bhavcopy(df: pd.DataFrame, d: datetime.date) -> int:
     return len(rows)
 
 
-def download_and_store(d: datetime.date) -> bool:
-    """Download + store one day. Skips if already stored. Returns True on success."""
-    if _is_already_stored(d):
+def download_and_store(d: datetime.date, force: bool = False) -> bool:
+    """Download + store one day. Skips if already stored (unless force). True on success."""
+    if not force and _is_already_stored(d):
         return True
     df = download_bhavcopy(d)
     if df is None or df.empty:
@@ -275,7 +287,7 @@ def _candidate_weekdays(n_trading_days: int) -> List[datetime.date]:
 
 
 def backfill(days: int = 400, delay: float = 0.35,
-             progress_cb=None) -> Tuple[int, int]:
+             progress_cb=None, force: bool = False) -> Tuple[int, int]:
     """Download last `days` trading days of history.
 
     Args:
@@ -293,11 +305,11 @@ def backfill(days: int = 400, delay: float = 0.35,
     for i, d in enumerate(candidates):
         if stored >= days:
             break
-        if _is_already_stored(d):
+        if not force and _is_already_stored(d):
             already += 1
             stored  += 1   # counts towards target
             continue
-        ok = download_and_store(d)
+        ok = download_and_store(d, force=force)   # force: re-ingest (e.g. after widening STOCK_SERIES)
         if ok:
             stored  += 1
         else:
@@ -318,6 +330,37 @@ def update_today() -> bool:
         log.info("[bhavcopy] Today is weekend — no update needed")
         return False
     return download_and_store(d)
+
+
+# ── Official NSE universe (main board + SME, companies only — no ETFs) ──────────
+def refresh_official_universe() -> List[str]:
+    """Fetch NSE's equity master lists and cache them. New listings appear the day
+    they list, so IPOs join the scan universe automatically. Raises on failure."""
+    sess = _get_session()
+    syms = set()
+    for url in _UNIVERSE_URLS:
+        r = sess.get(url, timeout=30)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+        df.columns = df.columns.str.strip()
+        col = next(c for c in df.columns if c.upper() == "SYMBOL")
+        syms |= {s.strip() for s in df[col].astype(str) if s.strip()}
+    if len(syms) < 2000:                       # sanity: never shrink the universe on a bad fetch
+        raise ValueError(f"official universe looks truncated ({len(syms)} symbols)")
+    out = sorted(syms)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    UNIVERSE_FILE.write_text(f"# NSE official equity universe — {len(out)} symbols — "
+                             f"{datetime.datetime.now().isoformat(timespec='seconds')}\n" + "\n".join(out) + "\n")
+    log.info(f"[bhavcopy] official universe refreshed: {len(out)} symbols")
+    return out
+
+
+def official_universe() -> Optional[List[str]]:
+    """Cached official universe (symbols without suffix), or None if never fetched."""
+    if not UNIVERSE_FILE.exists():
+        return None
+    syms = [l.strip() for l in UNIVERSE_FILE.read_text().splitlines() if l.strip() and not l.startswith("#")]
+    return syms or None
 
 
 # ── In-memory cache ────────────────────────────────────────────────────────────

@@ -98,6 +98,11 @@ async def startup_event():
                     nse_bhavcopy.update_today()
         except Exception as e:
             print(f"[bhavcopy] startup check failed: {e}")
+        try:   # scan universe = NSE's official equity lists (IPOs join automatically)
+            import screener as _sc
+            print(f"[universe] NSE official universe: {_sc.refresh_nse_universe()} symbols")
+        except Exception as e:
+            print(f"[universe] refresh failed — keeping current list: {e}")
 
     threading.Thread(target=_bhavcopy_startup, daemon=True).start()
 
@@ -149,6 +154,11 @@ async def startup_event():
                 print(f"[bhavcopy] Nightly update: {'✓' if ok else 'skipped (holiday/weekend)'}")
             except Exception as e:
                 print(f"[bhavcopy] Nightly update error: {e}")
+            try:
+                import screener as _sc
+                print(f"[universe] nightly refresh: {_sc.refresh_nse_universe()} symbols")
+            except Exception as e:
+                print(f"[universe] nightly refresh failed — keeping current list: {e}")
 
         scheduler.add_job(
             _bhav_update_job,
@@ -413,14 +423,34 @@ def bhavcopy_status():
 @app.post("/api/screener/bhavcopy/backfill")
 def bhavcopy_backfill(body: dict = {}):
     """Trigger a Bhavcopy backfill in the background. Returns immediately."""
-    days = int(body.get("days", 400))
+    days  = int(body.get("days", 400))
+    force = bool(body.get("force", False))   # re-ingest stored dates (e.g. to add BE/BZ/SME rows)
     import threading, nse_bhavcopy
-    threading.Thread(
-        target=nse_bhavcopy.backfill,
-        kwargs={"days": days},
-        daemon=True,
-    ).start()
-    return {"status": "backfill started", "days": days}
+
+    def _run():
+        nse_bhavcopy.backfill(days=days, force=force)
+        nse_bhavcopy.invalidate_cache()          # scans pick up the new rows
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "backfill started", "days": days, "force": force}
+
+
+@app.post("/api/screener/universe/refresh")
+def universe_refresh():
+    """Re-fetch NSE's official equity lists (main board + SME) into the scan universe."""
+    import screener as _sc
+    try:
+        n = _sc.refresh_nse_universe()
+        return {"status": "ok", "nse_universe": n, "intraday_universe": len(_sc.intraday_universe("NSE"))}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "nse_universe": len(_sc.UNIVERSES.get("NSE", []))}
+
+
+@app.get("/api/screener/universe/status")
+def universe_status():
+    import screener as _sc, nse_bhavcopy
+    return {"nse_universe": len(_sc.UNIVERSES.get("NSE", [])),
+            "official_cached": bool(nse_bhavcopy.official_universe()),
+            "intraday_universe": len(_sc.intraday_universe("NSE"))}
 
 app.add_middleware(
     CORSMiddleware,

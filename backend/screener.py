@@ -493,7 +493,21 @@ def _load_tickers(filename: str, suffix: str) -> List[str]:
                 tickers.append(t)
     return tickers
 
-_NSE_TICKERS    = _load_tickers("nse_tickers.txt",     ".NS")
+def _nse_universe_tickers() -> List[str]:
+    """NSE scan universe = NSE's official equity lists (main board + SME, refreshed daily
+    by refresh_nse_universe), so every listed stock — incl. new IPOs — is scanned.
+    Falls back to the static nse_tickers.txt if the official list was never fetched."""
+    try:
+        import nse_bhavcopy
+        syms = nse_bhavcopy.official_universe()
+        if syms:
+            return [f"{s}.NS" for s in syms]
+    except Exception as e:
+        print(f"[screener] official NSE universe unavailable ({e}) — using nse_tickers.txt")
+    return _load_tickers("nse_tickers.txt", ".NS")
+
+_NSE_TICKERS    = _nse_universe_tickers()
+_LEGACY_NSE     = set(_load_tickers("nse_tickers.txt", ".NS"))   # old static list (yfinance-fallback scope)
 _BSE_TICKERS    = _load_tickers("bse_tickers.txt",     ".BO")
 _SP500_TICKERS  = _load_tickers("sp500_tickers.txt",   "")    # no suffix — US tickers as-is
 _JAPAN_TICKERS  = _load_tickers("japan_tickers.txt",   ".T")  # Tokyo Stock Exchange
@@ -1533,13 +1547,58 @@ def _intraday_stale(exchange: str, window_min: int) -> bool:
         return True
 
 
+def refresh_nse_universe() -> int:
+    """Re-fetch NSE's official equity lists; update UNIVERSES['NSE'] in place."""
+    import nse_bhavcopy
+    syms = nse_bhavcopy.refresh_official_universe()
+    _NSE_TICKERS[:] = [f"{s}.NS" for s in syms]
+    _INTRA_UNI.clear()
+    return len(_NSE_TICKERS)
+
+
+# Live intraday candles are fetched only for names liquid enough to ever pass a liquid
+# scan (50-day turnover >= this, a quarter of the Setup Scan's Rs10cr floor). Keeps the
+# Angel/yfinance load bounded as the universe grows; illiquid names then simply have no
+# candle intraday and are skipped by the stale-session guard instead of being mis-scored.
+INTRADAY_MIN_TURNOVER_CR = 2.5
+_INTRA_UNI: Dict[str, Any] = {}
+
+
+def intraday_universe(exchange: str) -> List[str]:
+    tickers = UNIVERSES.get(exchange, [])
+    if exchange != "NSE":
+        return tickers
+    today = datetime.date.today().isoformat()
+    hit = _INTRA_UNI.get(exchange)
+    if hit and hit[0] == today and hit[1] == len(tickers):
+        return hit[2]
+    try:
+        import nse_bhavcopy
+        data = nse_bhavcopy.load_ohlcv()
+        keep = []
+        for t in tickers:
+            df = data.get(t)
+            if df is None or df.empty:
+                continue
+            tail = df.tail(50)
+            if float((tail["Close"] * tail["Volume"]).mean()) / 1e7 >= INTRADAY_MIN_TURNOVER_CR:
+                keep.append(t)
+        if len(keep) < 500:                     # sanity: DB not loaded yet — don't starve intraday
+            keep = list(tickers)
+    except Exception as e:
+        print(f"[screener] intraday_universe fallback ({e})")
+        keep = list(tickers)
+    _INTRA_UNI[exchange] = (today, len(tickers), keep)
+    return keep
+
+
 def intraday_coverage_report(exchange: str = "NSE", bar_min: int = 75, refresh: bool = False) -> dict:
     """Proactive coverage check: which universe tickers have TODAY's intraday bar, and
     which of the MISSING ones are LIQUID (could be a setup — a stale illiquid name is
     noise, a stale liquid one like BEPL is the thing to catch). Optionally forces a
     fresh pull first, so a morning check verifies the just-closed candle. Never raises."""
     try:
-        tickers = UNIVERSES.get(exchange, [])
+        tickers = intraday_universe(exchange)
         if refresh and exchange in ("NSE", "BSE") and _is_market_open(exchange):
             try:
                 refresh_intraday_today(exchange, bar_min)
@@ -1605,7 +1664,7 @@ def refresh_intraday_today(exchange: str = "NSE", bar_min: int = 75) -> dict:
             return {"skipped": "already running", "exchange": exchange, "bar_min": bar_min}
         _TOPUP_RUNNING.add(key)
     try:
-        tickers = UNIVERSES.get(exchange, [])
+        tickers = intraday_universe(exchange)
         if not tickers:
             return {"skipped": "empty universe", "exchange": exchange}
         prev = _load_intraday_cache(exchange, bar_min)
@@ -2208,10 +2267,12 @@ def _download_ohlcv(exchange: str, tickers: List[str]) -> Dict[str, pd.DataFrame
             import nse_bhavcopy
             bhav_data = nse_bhavcopy.load_ohlcv()
             if bhav_data:
-                # Filter to universe tickers only — Bhavcopy contains ALL NSE EQ stocks
-                # but we must only scan the symbols in nse_tickers.txt
+                # Filter to the scan universe. The DB holds every traded NSE stock (all stock
+                # series), so a universe name missing here is either too new to score
+                # (< min_bars sessions) or suspended — not worth a yfinance pull on every
+                # scan. Keep the yfinance gap-fill only for the old static list, as before.
                 universe_data = {t: bhav_data[t] for t in tickers if t in bhav_data}
-                yf_miss = [t for t in tickers if t not in bhav_data]
+                yf_miss = [t for t in tickers if t not in bhav_data and t in _LEGACY_NSE]
                 if yf_miss:
                     print(f"[screener] Bhavcopy: {len(universe_data)}/{len(tickers)} universe tickers; "
                           f"{len(yf_miss)} not in DB — yfinance fallback")
@@ -2645,6 +2706,7 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
             "symbol":            display,
             "ticker":            ticker,
             "price":             _sf(price),
+            "bar_date":          str(close.index[-1])[:10],   # session of the last candle (stale-data guard)
             "change_pct":        _safe(change_pct),
             "volume":            volume,
             "avg_vol_20":        avg_vol_20,
@@ -3408,7 +3470,7 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
         if not cache_has_today and _is_market_open(exchange):
             print(f"[screener] {exchange}: today's bar missing during market hours — injecting live…")
             if exchange in ("NSE", "BSE"):
-                live_bars = _fetch_live_nse_bars(tickers)
+                live_bars = _fetch_live_nse_bars(intraday_universe(exchange))
             else:
                 live_bars = _fetch_live_us_bars(tickers)
 
@@ -3478,7 +3540,15 @@ def run_screen(exchange: str, filters: Dict, as_of_date: str = None, interval: s
     # Apply this formula's filter over the (possibly cached) indicator dicts — microseconds.
     # Per-ticker try/except keeps one bad row from failing the whole scan (matches old behaviour).
     matched_tickers = []
+    # NSE/BSE: skip names with no candle on this scan's session — suspended stocks, or
+    # data that stopped updating — instead of scoring their last old candle as if it
+    # were today's (e.g. STLTECH frozen since May showing in an October scan).
+    _session = ""
+    if exchange in ("NSE", "BSE"):
+        _session = max((i.get("bar_date") or "" for i in all_inds.values()), default="")
     for _t, _ind in all_inds.items():
+        if _session and (_ind.get("bar_date") or "") < _session:
+            continue
         try:
             if apply_filters(_ind, filters):
                 matched_tickers.append(_t)
@@ -3553,7 +3623,7 @@ def prewarm_intraday_ohlcv_cache(exchange_bars: List[tuple] = None) -> None:
         exchange_bars = [("NSE", 75)]
     for exchange, bar_min in exchange_bars:
         try:
-            tickers = UNIVERSES.get(exchange, [])
+            tickers = intraday_universe(exchange)
             if not tickers:
                 continue
             # Check TODAY's file specifically — _load_intraday_cache falls back to
