@@ -853,9 +853,9 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
                 result['change_pct_min'] = 0; matched = True
 
             # price vs SMA  — APPEND to sma_conditions list
-            elif (m := _re.match(r'(?:price|close)\s*([><=]+)\s*sma\s*\(?\s*(\d+)\s*\)?', p)):
-                op, n = m.group(1), m.group(2)
-                cond = f"price_{'above' if '>' in op else 'below'}_sma{n}"
+            elif (m := _re.match(r'(?:price|close)\s*([><=]+)\s*sma\s*\(?\s*(\d+)\s*\)?(?:\s*\*\s*([\d.]+))?', p)):
+                op, n, k = m.group(1), m.group(2), m.group(3)
+                cond = f"price_{'above' if '>' in op else 'below'}_sma{n}" + (f"*{float(k):g}" if k and float(k) != 1 else "")
                 result.setdefault('sma_conditions', [])
                 if cond not in result['sma_conditions']:
                     result['sma_conditions'].append(cond)
@@ -900,9 +900,9 @@ def parse_formula(formula: str, exchange: str = "") -> Dict:
                 matched = True
 
             # SMA vs SMA  — APPEND to sma_conditions list
-            elif (m := _re.match(r'sma\s*\(?\s*(\d+)\s*\)?\s*([><=]+)\s*sma\s*\(?\s*(\d+)\s*\)?', p)):
-                n1, op, n2 = m.group(1), m.group(2), m.group(3)
-                cond = f"sma{n1}_{'above' if '>' in op else 'below'}_sma{n2}"
+            elif (m := _re.match(r'sma\s*\(?\s*(\d+)\s*\)?\s*([><=]+)\s*sma\s*\(?\s*(\d+)\s*\)?(?:\s*\*\s*([\d.]+))?', p)):
+                n1, op, n2, k = m.group(1), m.group(2), m.group(3), m.group(4)
+                cond = f"sma{n1}_{'above' if '>' in op else 'below'}_sma{n2}" + (f"*{float(k):g}" if k and float(k) != 1 else "")
                 result.setdefault('sma_conditions', [])
                 if cond not in result['sma_conditions']:
                     result['sma_conditions'].append(cond)
@@ -2446,14 +2446,11 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         vol20      = vol.tail(20).dropna()
         avg_vol_20 = int(vol20.mean()) if len(vol20) else 0
 
-        # MIO evaluates sma(N) comparisons using the PREVIOUS bar's SMA value,
-        # not today's.  This matches MIO's screener convention: the SMA is the
-        # "completed" N-bar average ending on the bar BEFORE the current candle.
-        # Using iloc[-2] (prev bar) rather than iloc[-1] (current bar) picks up
-        # ~5 extra stocks per scan that had fresh SMA crossovers on the current
-        # day — they passed MIO's prev-bar check but failed a current-bar check.
-        # price, change_pct, ATR, candle_pos still use today's close (iloc[-1]).
-        def sma(n): return _sf(close.rolling(n).mean().iloc[-2], 4) if len(close) >= n + 1 else None
+        # sma(N) = TODAY's N-bar average (iloc[-1]). The old prev-bar convention (iloc[-2])
+        # matched MIO's May-6 sample on yfinance data; on Bhavcopy data today's SMA matches
+        # better (May 6: recall 94.4 -> 96.8%, precision 95 -> 97%) and fits the master's
+        # setups better — re-measured 2026-10-17 with backend/scan_lab.py.
+        def sma(n): return _sf(close.rolling(n).mean().iloc[-1], 4) if len(close) >= n else None
 
         sma5   = sma(5);  sma10 = sma(10)
         sma20  = sma(20); sma50 = sma(50); sma100 = sma(100); sma200 = sma(200)
@@ -2519,20 +2516,20 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         # days on 75min — too short to catch stocks in multi-week downtrends.
         _T = 5 if intraday else 1          # intraday scale factor
 
-        # All SMA series use iloc[-2] (prev bar) for consistency with the sma() function above.
+        # SMA series are evaluated at today's bar, consistent with sma() above.
         sma50_series     = close.rolling(50).mean()
-        # trend_dn/trend_up: prev-bar SMA vs N bars before that
-        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 2)]) if len(sma50_series) >= 50 + 20*_T + 2 else None
-        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 2)]) if len(sma50_series) >= 50 + 5*_T  + 2 else None
-        # MIO semantics: trend_dn N = prev-bar SMA < SMA N bars before prev-bar.
+        # trend_dn/trend_up: today's SMA vs N bars ago
+        sma50_20bars_ago = float(sma50_series.iloc[-(20*_T + 1)]) if len(sma50_series) >= 50 + 20*_T + 1 else None
+        sma50_5bars_ago  = float(sma50_series.iloc[-(5*_T  + 2)]) if len(sma50_series) >= 50 + 5*_T  + 1 else None
+        # trend_dn N = today's SMA < SMA N bars ago.
         sma50_trend_dn_5  = bool(sma50 is not None and sma50_5bars_ago  is not None and sma50 < sma50_5bars_ago)
         sma50_trend_dn_20 = bool(sma50 is not None and sma50_20bars_ago is not None and sma50 < sma50_20bars_ago)
 
         # sma(20) trend direction — scaled lookback for intraday
         sma20_series     = close.rolling(20).mean()
-        sma20_10bars_ago = float(sma20_series.iloc[-(10*_T + 2)]) if len(sma20_series) >= 20 + 10*_T + 2 else None
-        sma20_5bars_ago  = float(sma20_series.iloc[-(5*_T  + 2)]) if len(sma20_series) >= 20 + 5*_T  + 2 else None
-        sma20_20bars_ago = float(sma20_series.iloc[-(20*_T + 2)]) if len(sma20_series) >= 20 + 20*_T + 2 else None
+        sma20_10bars_ago = float(sma20_series.iloc[-(10*_T + 1)]) if len(sma20_series) >= 20 + 10*_T + 1 else None
+        sma20_5bars_ago  = float(sma20_series.iloc[-(5*_T  + 2)]) if len(sma20_series) >= 20 + 5*_T  + 1 else None
+        sma20_20bars_ago = float(sma20_series.iloc[-(20*_T + 1)]) if len(sma20_series) >= 20 + 20*_T + 1 else None
         sma20_trend_dn_5  = bool(sma20 is not None and sma20_5bars_ago  is not None and sma20 < sma20_5bars_ago)
         sma20_trend_dn_10 = bool(sma20 is not None and sma20_10bars_ago is not None and sma20 < sma20_10bars_ago)
         sma20_trend_dn_20 = bool(sma20 is not None and sma20_20bars_ago is not None and sma20 < sma20_20bars_ago)
@@ -2708,18 +2705,18 @@ import re as _re2
 def _eval_sma(ind: Dict, cond: str) -> bool:
     """Evaluate a single SMA condition string against indicator dict."""
     p = ind["price"]
-    m = _re2.match(r'price_(above|below)_sma(\d+)$', cond)
+    m = _re2.match(r'price_(above|below)_sma(\d+)(?:\*([\d.]+))?$', cond)
     if m:
-        d, n = m.group(1), int(m.group(2))
+        d, n, k = m.group(1), int(m.group(2)), float(m.group(3) or 1)
         v = ind.get(f"sma{n}")
         if v is None: return False
-        return p > v if d == 'above' else p < v
-    m = _re2.match(r'sma(\d+)_(above|below)_sma(\d+)$', cond)
+        return p > v * k if d == 'above' else p < v * k
+    m = _re2.match(r'sma(\d+)_(above|below)_sma(\d+)(?:\*([\d.]+))?$', cond)
     if m:
-        n1, d, n2 = int(m.group(1)), m.group(2), int(m.group(3))
+        n1, d, n2, k = int(m.group(1)), m.group(2), int(m.group(3)), float(m.group(4) or 1)
         v1, v2 = ind.get(f"sma{n1}"), ind.get(f"sma{n2}")
         if v1 is None or v2 is None: return False
-        return v1 > v2 if d == 'above' else v1 < v2
+        return v1 > v2 * k if d == 'above' else v1 < v2 * k
     return True  # unknown condition — pass through
 
 def _eval_ema(ind: Dict, cond: str) -> bool:
