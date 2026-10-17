@@ -386,6 +386,7 @@ def official_universe() -> Optional[List[str]]:
 _CA_URL = ("https://www.nseindia.com/api/corporates-corporateActions"
            "?index={idx}&from_date={a:%d-%m-%Y}&to_date={b:%d-%m-%Y}")
 _CA_HEADERS = {"Accept":  "application/json, text/plain, */*",
+               "Accept-Encoding": "gzip, deflate",   # NSE answers "br" with brotli, unreadable without the brotli package
                "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-actions"}
 CA_GAP_MIN   = 1.35    # prev close ÷ open beyond 1.35× either way (−26% / +35%) is outside every price band
 CA_EVENT_GAP = 1.10    # demerger/rights without a stated ratio: adjust only for a real gap
