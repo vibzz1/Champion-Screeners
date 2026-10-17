@@ -14,7 +14,7 @@ against the engine), so any scan variant can be scored in seconds on:
   * daily result counts                — is the list manageable?
 
 Data: backend/cache/nse_bhav_full/YYYYMMDD.csv (UDiFF bhavcopy, unzipped).
-Usage: python3 scan_lab.py [--verify 2026-10-09] [--days 40]
+Usage: python3 scan_lab.py [--verify 2026-10-09] [--days 40] [--raw]
 """
 import os, sys, csv, argparse, collections
 import numpy as np
@@ -45,20 +45,18 @@ def load(data_dir=DATA, series=STOCK_SERIES):
     return df.sort_values(["sym", "date"]).reset_index(drop=True)[["sym", "date", "ser", "O", "H", "L", "C", "PC", "V"]]
 
 
-def adjust(df, lo=0.9, hi=1.11):
-    """Back-adjust for splits/bonuses/rights using NSE's own adjusted previous close:
-    on an ex-date PC[t] != C[t-1]; factor = PC[t] / C[t-1] scales all earlier bars."""
-    df = df.copy()
-    prevC = df.groupby("sym", sort=False)["C"].shift(1)
-    fac = (df["PC"] / prevC).where(lambda x: (x < lo) | (x > hi), 1.0).fillna(1.0)
-    # adj for row s = product of factors strictly after s (within the symbol)
-    rev = fac.iloc[::-1].groupby(df["sym"].iloc[::-1], sort=False).cumprod().iloc[::-1]
-    adj = (rev / fac).astype(float)
-    for c in ("O", "H", "L", "C"):
-        df[c] = (df[c] * adj).round(4)
-    df["V"] = df["V"] / adj
-    df["ca"] = fac != 1.0
-    return df
+def ca_adjust(df):
+    """Back-adjust for splits/bonuses/demergers with the production code
+    (nse_bhavcopy.apply_corp_actions + the corp_actions table), so the harness scores
+    exactly the prices the live scan sees. Populate events: nse_bhavcopy.refresh_corp_actions()."""
+    sys.path.insert(0, HERE)
+    import nse_bhavcopy as nb
+    x = df.rename(columns={"sym": "symbol", "O": "Open", "H": "High", "L": "Low", "C": "Close", "V": "Volume"})
+    x["date"] = pd.to_datetime(x["date"])
+    x, n = nb.apply_corp_actions(x, nb.load_corp_actions(), today=x["date"].max().date())
+    x["date"] = x["date"].dt.strftime("%Y-%m-%d")
+    print(f"corporate-action adjustments: {n}")
+    return x.rename(columns={"symbol": "sym", "Open": "O", "High": "H", "Low": "L", "Close": "C", "Volume": "V"})
 
 
 # ── features (mirror of compute_indicators, daily bars) ─────────────────────
@@ -185,34 +183,27 @@ def daily_counts(f, cfg, days):
 
 # ── engine cross-check ──────────────────────────────────────────────────────
 def verify(df, f, date):
+    """Prove the vectorised FINAL scan == screener.py running the app's d1 formula."""
     sys.path.insert(0, HERE)
-    import re, subprocess
+    import re
     from screener import compute_indicators, parse_formula, apply_filters
-    app = re.search(r'id:\s*"d1".*?formula:\s*"([^"]+)"', open(os.path.join(HERE, "..", "src/app/screener/constants.ts")).read(), re.S).group(1)
-    app = app.replace("@{0..20}", "")                       # strict form, as production has it
-    mio = app.replace("!(sma(20) < sma(50))", "!(sma(20) < sma(50))@{0..20}")
-    Fa, Fm = parse_formula(app, exchange="NSE"), parse_formula(mio, exchange="NSE")
-    Fm_nl = parse_formula(re.sub(r"advol\(\d+\) > \d+ and ", "", mio), exchange="NSE")
+    d1 = re.search(r'id:\s*"d1".*?formula:\s*"([^"]+)"', open(os.path.join(HERE, "..", "src/app/screener/constants.ts")).read(), re.S).group(1)
+    forms = {"d1": parse_formula(d1, exchange="NSE"),
+             "d1_noliq": parse_formula(re.sub(r"advol\(\d+\) > \d+ and ", "", d1), exchange="NSE")}
     eng = collections.defaultdict(set)
     syms = set(df.loc[df["date"] == date, "sym"])
     for sym, g in df[df["sym"].isin(syms) & (df["date"] <= date)].groupby("sym"):
         d = pd.DataFrame({"Open": g["O"].values, "High": g["H"].values, "Low": g["L"].values,
                           "Close": g["C"].values, "Volume": g["V"].values}, index=pd.to_datetime(g["date"].values))
         ind = compute_indicators(sym + ".NS", d, as_of_date=date, include_ohlcv=False)
-        if not ind:
-            continue
-        for k, F in (("app", Fa), ("mio", Fm), ("mio_noliq", Fm_nl)):
-            if apply_filters(ind, F):
+        for k, F in forms.items():
+            if ind and apply_filters(ind, F):
                 eng[k].add(sym)
-    src = open(os.path.join(HERE, "screener.py")).read()
-    lb = "incl" if "sma20_series.iloc[-21:]  #" in src else "excl"   # which lookback this engine has
-    print(f"  (engine under test uses lookback window '{lb}')")
-    vec = {"app": scan(f, {"m2050": "strict"}, [date]).get(date, set()),
-           "mio": scan(f, {"m2050": lb}, [date]).get(date, set()),
-           "mio_noliq": scan(f, {"m2050": lb, "liq": False}, [date]).get(date, set())}
-    for k in ("app", "mio", "mio_noliq"):
+    vec = {"d1": scan(f, FINAL, [date]).get(date, set()),
+           "d1_noliq": scan(f, {**FINAL, "liq": False}, [date]).get(date, set())}
+    for k in forms:
         a, b = eng[k], vec[k]
-        print(f"  {k:<10} engine {len(a):>4} | vectorised {len(b):>4} | identical: {a == b}"
+        print(f"  {k:<9} engine {len(a):>4} | vectorised {len(b):>4} | identical: {a == b}"
               + ("" if a == b else f"  engine-only {sorted(a - b)[:8]}  vec-only {sorted(b - a)[:8]}"))
 
 
@@ -233,8 +224,9 @@ def main():
     ap.add_argument("--verify", default=None, help="date to prove vectorised == engine")
     ap.add_argument("--days", type=int, default=40, help="recent sessions for daily counts")
     ap.add_argument("--g52", type=float, nargs="*", default=[], help="52w-high gates to try on D/E/F")
+    ap.add_argument("--raw", action="store_true", help="skip corporate-action adjustment")
     a = ap.parse_args()
-    df = load(); f = features(df)
+    df = load() if a.raw else ca_adjust(load()); f = features(df)
     cal = sorted(df["date"].unique())
     print(f"data: {len(cal)} sessions {cal[0]} → {cal[-1]} | {df['sym'].nunique()} symbols")
     if a.verify:

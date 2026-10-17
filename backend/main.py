@@ -103,6 +103,12 @@ async def startup_event():
             print(f"[universe] NSE official universe: {_sc.refresh_nse_universe()} symbols")
         except Exception as e:
             print(f"[universe] refresh failed — keeping current list: {e}")
+        try:   # first run pulls the DB's whole history; afterwards a 45-day window
+            import nse_bhavcopy
+            print(f"[corp-actions] NSE splits/bonuses/demergers: {nse_bhavcopy.refresh_corp_actions()} rows")
+            nse_bhavcopy.invalidate_cache()
+        except Exception as e:
+            print(f"[corp-actions] refresh failed — keeping stored events: {e}")
 
     threading.Thread(target=_bhavcopy_startup, daemon=True).start()
 
@@ -159,6 +165,12 @@ async def startup_event():
                 print(f"[universe] nightly refresh: {_sc.refresh_nse_universe()} symbols")
             except Exception as e:
                 print(f"[universe] nightly refresh failed — keeping current list: {e}")
+            try:   # splits/bonuses: last 45 days + announced ex-dates for the next 60
+                import nse_bhavcopy
+                print(f"[corp-actions] nightly refresh: {nse_bhavcopy.refresh_corp_actions()} rows")
+                nse_bhavcopy.invalidate_cache()
+            except Exception as e:
+                print(f"[corp-actions] nightly refresh failed — keeping stored events: {e}")
 
         scheduler.add_job(
             _bhav_update_job,

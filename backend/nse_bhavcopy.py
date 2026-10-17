@@ -18,6 +18,7 @@ Volume units:
 
 import io
 import os
+import re
 import sqlite3
 import datetime
 import logging
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
+import numpy as np
 import pandas as pd
 
 log = logging.getLogger(__name__)
@@ -94,6 +96,14 @@ CREATE TABLE IF NOT EXISTS fetched_dates (
     date TEXT PRIMARY KEY,
     rows INTEGER,
     fetched_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS corp_actions (
+    symbol  TEXT NOT NULL,
+    ex_date TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    factor  REAL,            -- exact price factor; NULL = demerger/rights, ratio taken from the ex-date gap
+    PRIMARY KEY (symbol, ex_date, subject)
 );
 """
 
@@ -363,9 +373,162 @@ def official_universe() -> Optional[List[str]]:
     return syms or None
 
 
+# ── Corporate actions (splits / bonuses / demergers) ───────────────────────────
+# Bhavcopy prices are raw. On a 1:1 bonus the price halves overnight, every moving
+# average breaks for 50+ sessions and the stock silently drops out of trend scans.
+# The DB stays raw; load_ohlcv() back-adjusts history (prices ÷ f, volume × f,
+# turnover unchanged) from:
+#   1. NSE's corporate-action feed — splits/bonuses/consolidations carry an exact
+#      ratio (applied when the ex-date gap confirms it); demergers/rights don't, so
+#      their ratio is the ex-date opening gap;
+#   2. any overnight gap no NSE price band allows (max band 20%) — the feed misses
+#      some events outright (HEG's Oct-2024 split isn't in it).
+_CA_URL = ("https://www.nseindia.com/api/corporates-corporateActions"
+           "?index={idx}&from_date={a:%d-%m-%Y}&to_date={b:%d-%m-%Y}")
+_CA_HEADERS = {"Accept":  "application/json, text/plain, */*",
+               "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-actions"}
+CA_GAP_MIN   = 1.35    # prev close ÷ open beyond 1.35× either way (−26% / +35%) is outside every price band
+CA_EVENT_GAP = 1.10    # demerger/rights without a stated ratio: adjust only for a real gap
+_CA_SNAP     = tuple(f for r in (1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 10.0) for f in (r, 1 / r))  # round split/bonus/consolidation ratios
+
+
+def _ca_factor(subject: str) -> Tuple[bool, Optional[float]]:
+    """(relevant, factor) for a feed subject line. factor None = demerger/rights-style
+    event whose ratio comes from the price gap. Dividends, AGMs etc. → (False, None)."""
+    s = " ".join(subject.lower().split())
+    if any(w in s for w in ("ncrps", "preference", "debenture")):
+        return False, None
+    m = re.search(r"bonus\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)", s)            # "Bonus 1:3" = 1 new per 3 held
+    if m and float(m[2]) > 0:
+        return True, (float(m[1]) + float(m[2])) / float(m[2])
+    m = re.search(r"(?:split|sub-division|consolidation).*?from\s*r[se]\.?\s*(\d+(?:\.\d+)?)"
+                  r".*?to\s*r[se]\.?\s*(\d+(?:\.\d+)?)", s)                         # face value From Rs 10 To Rs 2
+    if m and float(m[2]) > 0:
+        return True, float(m[1]) / float(m[2])
+    if any(w in s for w in ("demerger", "rights", "scheme of arrangement", "capital reduction")):
+        return True, None
+    return False, None
+
+
+def refresh_corp_actions(start: Optional[datetime.date] = None,
+                         end: Optional[datetime.date] = None) -> int:
+    """Pull NSE's corporate-action feed (main board + SME) into corp_actions.
+    Default window: last 45 days → next 60; the first run covers the DB's whole
+    history. Returns rows stored. Raises if every request failed."""
+    today = datetime.date.today()
+    with _get_conn() as c:
+        have  = c.execute("SELECT COUNT(*) FROM corp_actions").fetchone()[0]
+        first = c.execute("SELECT MIN(date) FROM ohlcv").fetchone()[0]
+    if start is None:
+        start = (datetime.date.fromisoformat(first) if not have and first
+                 else today - datetime.timedelta(days=45))
+    end = end or today + datetime.timedelta(days=60)
+
+    sess, rows, ok = _get_session(), [], 0
+    for idx in ("equities", "sme"):
+        a = start
+        while a <= end:
+            b = min(a + datetime.timedelta(days=89), end)
+            try:
+                r = sess.get(_CA_URL.format(idx=idx, a=a, b=b), headers=_CA_HEADERS, timeout=40)
+                r.raise_for_status()
+                data, ok = r.json(), ok + 1
+            except Exception as e:
+                log.warning(f"[bhavcopy] corp actions {idx} {a}..{b} failed: {e}")
+                data = []
+            for x in data if isinstance(data, list) else []:          # "no data" comes back as a dict
+                subj = " ".join(str(x.get("subject") or "").split())
+                relevant, f = _ca_factor(subj)
+                if not relevant or f == 1:
+                    continue
+                try:
+                    ex = datetime.datetime.strptime(str(x.get("exDate", "")).strip(), "%d-%b-%Y").date()
+                except ValueError:
+                    continue
+                rows.append((str(x["symbol"]).strip(), ex.isoformat(), subj, f))
+            a = b + datetime.timedelta(days=1)
+            time.sleep(0.5)
+    if not ok:
+        raise RuntimeError("NSE corporate-action feed unreachable")
+    with _get_conn() as c:
+        c.executemany("INSERT OR REPLACE INTO corp_actions VALUES (?,?,?,?)", rows)
+    log.info(f"[bhavcopy] corp actions {start}..{end}: {len(rows)} split/bonus/demerger rows")
+    return len(rows)
+
+
+def load_corp_actions() -> pd.DataFrame:
+    with _get_conn() as c:
+        ev = pd.read_sql_query("SELECT symbol, ex_date, factor FROM corp_actions", c)
+    ev["ex_date"] = pd.to_datetime(ev["ex_date"])
+    return ev
+
+
+def apply_corp_actions(df: pd.DataFrame, events: Optional[pd.DataFrame],
+                       today: Optional[datetime.date] = None) -> Tuple[pd.DataFrame, int]:
+    """Back-adjust a long OHLCV frame (symbol, date, Open, High, Low, Close, Volume;
+    sorted by symbol then date) for corporate actions. events: symbol, ex_date,
+    factor (NaN = take the gap). Returns (adjusted frame, adjustments applied)."""
+    df  = df.reset_index(drop=True)
+    sym = df["symbol"].to_numpy()
+    g   = df.groupby("symbol", sort=False)
+    prev_c = g["Close"].shift(1).to_numpy(float)
+    gap_o  = prev_c / df["Open"].where(df["Open"] > 0).to_numpy(float)
+    gap_c  = prev_c / df["Close"].where(df["Close"] > 0).to_numpy(float)
+    recent = ((df["date"] - g["date"].shift(1)).dt.days <= 15).to_numpy()   # a resumed listing isn't an ex-date
+    fac  = np.ones(len(df))
+    done = np.zeros(len(df), bool)
+    pending: Dict[str, float] = {}
+
+    def confirms(f, r):
+        tol = max(0.12, 0.35 * abs(np.log(f)))
+        return min(abs(np.log(gap_o[r] / f)), abs(np.log(gap_c[r] / f))) <= tol
+
+    if events is not None and len(events):
+        ev = events.dropna(subset=["ex_date"]).sort_values("ex_date")
+        bars = pd.DataFrame({"symbol": sym, "bar": df["date"], "row": np.arange(len(df))}).sort_values("bar")
+        m = pd.merge_asof(ev, bars, left_on="ex_date", right_on="bar", by="symbol", direction="forward")
+        on_bar = m[m["row"].notna() & ((m["bar"] - m["ex_date"]).dt.days <= 15)]
+        for r, fs in on_bar[on_bar["factor"].notna()].groupby("row")["factor"]:
+            r = int(r)
+            if not (recent[r] and np.isfinite(gap_o[r]) and np.isfinite(gap_c[r])):
+                continue
+            # bonus + split on one day multiply (LINC, NAZARA); a re-worded duplicate listing must not
+            for f in (float(np.prod(fs)), float(np.prod(fs.unique()))):
+                if confirms(f, r):
+                    fac[r], done[r] = f, True
+                    break
+        for r in on_bar.loc[on_bar["factor"].isna(), "row"].astype(int).unique():
+            if not done[r] and recent[r] and gap_o[r] >= CA_EVENT_GAP:    # demerger / rights
+                fac[r], done[r] = gap_o[r], True
+        # ex-date is today and tonight's Bhavcopy isn't in yet (morning intraday scans):
+        # restate all stored history in post-split terms so today's live bar lines up
+        today_ts = pd.Timestamp(today or datetime.date.today())
+        due = m[m["row"].isna() & m["factor"].notna() & (m["ex_date"] <= today_ts)]
+        for s, f in due.groupby("symbol")["factor"].prod().items():
+            pending[s] = f
+
+    unlisted = ~done & recent & (((gap_o >= CA_GAP_MIN) & (gap_c >= CA_GAP_MIN)) |
+                                 ((gap_o <= 1 / CA_GAP_MIN) & (gap_c <= 1 / CA_GAP_MIN)))   # split / consolidation
+    for r in np.flatnonzero(unlisted):
+        snap = min(_CA_SNAP, key=lambda s: abs(np.log(gap_o[r] / s)))
+        fac[r] = snap if abs(np.log(gap_o[r] / snap)) <= 0.05 else gap_o[r]
+
+    n = int((fac != 1).sum()) + len(pending)
+    if not n:
+        return df, 0
+    lf = np.log(fac)
+    later = pd.Series(lf[::-1]).groupby(sym[::-1], sort=False).cumsum().to_numpy()[::-1] - lf
+    div = np.exp(later) * (pd.Series(sym).map(pending).fillna(1.0).to_numpy() if pending else 1.0)
+    for col in ("Open", "High", "Low", "Close"):
+        df[col] = (df[col] / div).round(4)
+    df["Volume"] = (df["Volume"] * div).round()
+    return df, n
+
+
 # ── In-memory cache ────────────────────────────────────────────────────────────
 _cache:      Optional[Dict[str, pd.DataFrame]] = None
 _cache_date: Optional[str] = None
+_ca_applied: Optional[int] = None    # corporate-action adjustments in the last load
 
 
 def invalidate_cache() -> None:
@@ -386,7 +549,7 @@ def load_ohlcv(
     Results are in-memory cached for the current calendar day so that
     multiple scans in the same session hit the DB only once.
     """
-    global _cache, _cache_date
+    global _cache, _cache_date, _ca_applied
 
     today = datetime.date.today().isoformat()
 
@@ -419,6 +582,11 @@ def load_ohlcv(
         "volume":        "Volume",
         "turnover_lacs": "TurnoverLacs",
     })
+    try:
+        df_all, _ca_applied = apply_corp_actions(df_all, load_corp_actions())
+        log.info(f"[bhavcopy] corporate-action adjustments: {_ca_applied}")
+    except Exception as e:                       # never let an adjustment bug block scans
+        log.warning(f"[bhavcopy] corporate-action adjustment skipped (raw prices): {e}")
 
     result: Dict[str, pd.DataFrame] = {}
     for sym, grp in df_all.groupby("symbol", sort=False):
@@ -454,6 +622,9 @@ def get_status() -> Dict:
             n_rows = c.execute(
                 "SELECT COUNT(*) FROM ohlcv"
             ).fetchone()[0]
+            n_ca, ca_last = c.execute(
+                "SELECT COUNT(*), MAX(ex_date) FROM corp_actions"
+            ).fetchone()
         return {
             "source":      "nse_bhavcopy",
             "db_path":     str(DB_PATH),
@@ -461,6 +632,9 @@ def get_status() -> Dict:
             "days_stored": n_days,
             "tickers":     n_tickers,
             "rows":        n_rows,
+            "corp_actions":            n_ca,
+            "corp_actions_latest_ex":  ca_last,
+            "corp_action_adjustments": _ca_applied,   # None until the first load
             "cache_warm":  _cache is not None,
         }
     except Exception as e:
