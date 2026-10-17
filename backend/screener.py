@@ -2541,16 +2541,18 @@ def compute_indicators(ticker: str, df: pd.DataFrame, as_of_date: str = None, in
         # True if sma(A) was >= sma(B) at ANY point in the last N bars.
         # MIO rejects only stocks where sma(A) was CONTINUOUSLY below sma(B)
         # for the entire window — i.e. the cross never recovered at all.
-        # Use prev-bar series (exclude today) for lookback window — consistent with sma() above.
+        # Window = bars 0..20 INCLUDING today, matching MIO's @{0..20}. A 20/50 cross that
+        # happens today counts. Re-measured 2026-10-17 on Bhavcopy data vs MIO May-6 truth:
+        # excl. today 91.1% recall -> incl. today 94.4%, zero new false positives.
         sma20_not_below_sma50_lookback_20 = False
         if len(sma20_series) >= 21 and len(sma50_series) >= 51:
-            _t20 = sma20_series.iloc[-21:-1]  # last 20 completed bars (excl. today)
-            _t50 = sma50_series.iloc[-21:-1]
+            _t20 = sma20_series.iloc[-21:]  # bars 0..20 (today + last 20)
+            _t50 = sma50_series.iloc[-21:]
             _both_valid = _t20.notna() & _t50.notna()
             if _both_valid.any():
                 _vt20 = _t20[_both_valid]
                 _vt50 = _t50[_both_valid]
-                # True if sma20 >= sma50 at ANY of the last 20 completed bars (existential)
+                # True if sma20 >= sma50 at ANY bar in the window (existential)
                 sma20_not_below_sma50_lookback_20 = bool((_vt20 >= _vt50).any())
 
         # Relative volume: today's volume vs 20-day average
